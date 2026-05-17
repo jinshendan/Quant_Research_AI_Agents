@@ -9,6 +9,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from agents.factor_rolling import (
+    RollingFeatureSpec,
+    apply_rolling_features,
+    normalize_rolling_windows,
+)
 from agents.factor_templates import FactorTemplate, FactorTemplateLibrary
 from agents.factor_transforms import (
     DEFAULT_QUANTILE_COUNT,
@@ -33,6 +38,8 @@ class FeatureSpec:
 
     aligned_data_path: Path
     template_ids: tuple[str, ...] = ()
+    rolling_features: tuple[str, ...] = ()
+    rolling_windows: tuple[int, ...] = ()
     rank_transforms: tuple[str, ...] = ()
     quantile_count: int = DEFAULT_QUANTILE_COUNT
     preview_rows: int = DEFAULT_PREVIEW_ROWS
@@ -41,6 +48,13 @@ class FeatureSpec:
     def from_payload(cls, payload: Mapping[str, Any]) -> FeatureSpec:
         aligned_data_path = _required_path(payload, "aligned_data_path")
         template_ids = _optional_str_sequence(payload, "template_ids")
+        rolling_features = _optional_str_sequence(payload, "rolling_features")
+        raw_rolling_windows = _optional_int_sequence(payload, "rolling_windows")
+        rolling_windows = (
+            normalize_rolling_windows(raw_rolling_windows)
+            if raw_rolling_windows
+            else ()
+        )
         rank_transforms = _optional_str_sequence(payload, "rank_transforms")
         quantile_count = validate_quantile_count(
             _optional_int(
@@ -61,6 +75,8 @@ class FeatureSpec:
         return cls(
             aligned_data_path=aligned_data_path,
             template_ids=template_ids,
+            rolling_features=rolling_features,
+            rolling_windows=rolling_windows,
             rank_transforms=rank_transforms,
             quantile_count=quantile_count,
             preview_rows=preview_rows,
@@ -70,6 +86,8 @@ class FeatureSpec:
         return {
             "aligned_data_path": str(self.aligned_data_path),
             "template_ids": list(self.template_ids),
+            "rolling_features": list(self.rolling_features),
+            "rolling_windows": list(self.rolling_windows),
             "rank_transforms": list(self.rank_transforms),
             "quantile_count": self.quantile_count,
             "preview_rows": self.preview_rows,
@@ -83,8 +101,10 @@ class FeatureGenerationResult:
     data: pd.DataFrame
     factor_columns: tuple[str, ...]
     base_factor_columns: tuple[str, ...]
+    rolling_feature_columns: tuple[str, ...]
     transformed_factor_columns: tuple[str, ...]
     stats: dict[str, Any]
+    rolling_feature_stats: dict[str, Any] | None = None
     rank_transform_stats: dict[str, Any] | None = None
 
 
@@ -132,6 +152,8 @@ class FeatureAgent:
             result = self.generate_features(
                 aligned_data,
                 templates,
+                rolling_feature_names=spec.rolling_features,
+                rolling_windows=spec.rolling_windows,
                 rank_transform_names=spec.rank_transforms,
                 quantile_count=spec.quantile_count,
             )
@@ -164,14 +186,18 @@ class FeatureAgent:
                 "template_ids": template_ids,
                 "factor_columns": list(result.factor_columns),
                 "base_factor_columns": list(result.base_factor_columns),
+                "rolling_feature_columns": list(result.rolling_feature_columns),
                 "transformed_factor_columns": list(result.transformed_factor_columns),
+                "rolling_features": list(spec.rolling_features),
+                "rolling_windows": list(spec.rolling_windows),
                 "rank_transforms": list(spec.rank_transforms),
                 "row_count": len(result.data),
                 "factor_count": len(result.factor_columns),
                 "preview": _preview_records(result.data, spec.preview_rows),
                 "feature_stats": result.stats,
+                "rolling_feature_stats": result.rolling_feature_stats or {},
                 "rank_transform_stats": result.rank_transform_stats or {},
-                "next_action": "Add rolling-window features in Day 13.",
+                "next_action": "Save generated factors in Day 14.",
             },
             metadata=self._metadata(
                 request,
@@ -196,6 +222,8 @@ class FeatureAgent:
         aligned_data: pd.DataFrame,
         templates: Sequence[FactorTemplate],
         *,
+        rolling_feature_names: Sequence[str] = (),
+        rolling_windows: Sequence[int] = (),
         rank_transform_names: Sequence[str] = (),
         quantile_count: int = DEFAULT_QUANTILE_COUNT,
     ) -> FeatureGenerationResult:
@@ -214,6 +242,22 @@ class FeatureAgent:
             factor_columns.append(factor_column)
 
         base_factor_columns = tuple(factor_columns)
+        rolling_feature_columns: tuple[str, ...] = ()
+        rolling_feature_stats: dict[str, Any] | None = None
+        if rolling_feature_names or rolling_windows:
+            rolling_result = apply_rolling_features(
+                frame[list(IDENTITY_COLUMNS) + factor_columns],
+                factor_columns=factor_columns,
+                spec=RollingFeatureSpec.create(
+                    rolling_feature_names or None,
+                    windows=rolling_windows or None,
+                ),
+            )
+            frame = rolling_result.data
+            rolling_feature_columns = rolling_result.rolling_columns
+            factor_columns.extend(rolling_feature_columns)
+            rolling_feature_stats = rolling_result.stats
+
         transformed_factor_columns: tuple[str, ...] = ()
         rank_transform_stats: dict[str, Any] | None = None
         if rank_transform_names:
@@ -235,8 +279,10 @@ class FeatureAgent:
             data=frame[list(IDENTITY_COLUMNS) + factor_columns].copy(),
             factor_columns=tuple(factor_columns),
             base_factor_columns=base_factor_columns,
+            rolling_feature_columns=rolling_feature_columns,
             transformed_factor_columns=transformed_factor_columns,
             stats=stats,
+            rolling_feature_stats=rolling_feature_stats,
             rank_transform_stats=rank_transform_stats,
         )
 
@@ -552,6 +598,23 @@ def _optional_str_sequence(payload: Mapping[str, Any], key: str) -> tuple[str, .
             msg = f"payload.{key} must contain only non-empty strings."
             raise ValueError(msg)
         values.append(item.strip())
+    return tuple(dict.fromkeys(values))
+
+
+def _optional_int_sequence(payload: Mapping[str, Any], key: str) -> tuple[int, ...]:
+    value = payload.get(key)
+    if value is None:
+        return ()
+    if isinstance(value, str) or not isinstance(value, Sequence):
+        msg = f"payload.{key} must be a sequence of integers."
+        raise ValueError(msg)
+
+    values = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, int):
+            msg = f"payload.{key} must contain only integers."
+            raise ValueError(msg)
+        values.append(item)
     return tuple(dict.fromkeys(values))
 
 

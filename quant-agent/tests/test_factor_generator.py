@@ -119,7 +119,7 @@ def test_factor_generation_agent_returns_structured_response() -> None:
     assert response.output["state"] == "factors_generated"
     assert response.output["factor_count"] == 5
     assert response.output["generation_method"] == "deterministic_factor_family_v1"
-    assert response.output["next_action"] == "Add rolling-window features in Day 13."
+    assert response.output["next_action"] == "Save generated factors in Day 14."
     assert response.output["factors"][0]["factor_id"] == "alpha_001"
     assert response.output["generation_stats"]["unique_expression_count"] == 5
     assert response.metadata["agent"] == "FactorGenerationAgent"

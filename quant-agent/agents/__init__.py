@@ -10,6 +10,11 @@ from agents.factor_templates import (
     FactorTemplate,
     FactorTemplateLibrary,
 )
+from agents.factor_rolling import (
+    RollingFeatureResult,
+    RollingFeatureSpec,
+    apply_rolling_features,
+)
 from agents.factor_transforms import (
     RankTransformResult,
     RankTransformSpec,
@@ -61,8 +66,6 @@ __all__ = [
     "FactorGenerationSpec",
     "FactorTemplate",
     "FactorTemplateLibrary",
-    "RankTransformResult",
-    "RankTransformSpec",
     "FeatureAgent",
     "FeatureGenerationResult",
     "FeatureSpec",
@@ -79,8 +82,13 @@ __all__ = [
     "MarketDataStorageResult",
     "MarketDataSpec",
     "OhlcvCleanResult",
+    "RankTransformResult",
+    "RankTransformSpec",
+    "RollingFeatureResult",
+    "RollingFeatureSpec",
     "TradingCalendarProvider",
     "align_to_trading_calendar",
     "apply_rank_transforms",
+    "apply_rolling_features",
     "clean_ohlcv",
 ]

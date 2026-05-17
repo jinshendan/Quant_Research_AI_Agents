@@ -14,6 +14,7 @@ Input context:
 - aligned market-data location
 - target factor count
 - optional cross-sectional rank transforms
+- optional per-symbol rolling-window transforms
 
 Rules:
 
@@ -25,8 +26,9 @@ Rules:
 - Return factor values separately from evaluation labels.
 - Keep candidate factor definitions separate from performance claims.
 - Apply cross-sectional transforms by date only, never across future dates.
+- Apply rolling-window transforms within each symbol using only current and
+  historical rows.
 
-The current Day 12 implementation can append rank, percentile-rank, demean,
-z-score, and quantile transforms in memory. Rolling-window feature expansion,
-durable factor-matrix persistence, and performance evaluation are deferred to
-later tasks.
+The current Day 13 implementation can append rank transforms and rolling-window
+features in memory. Durable factor-matrix persistence and performance
+evaluation are deferred to later tasks.

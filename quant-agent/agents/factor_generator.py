@@ -265,7 +265,7 @@ class FactorGenerationAgent:
                 "generation_method": GENERATION_METHOD,
                 "factors": factors,
                 "generation_stats": result.stats,
-                "next_action": "Add rolling-window features in Day 13.",
+                "next_action": "Save generated factors in Day 14.",
             },
             metadata=self._metadata(
                 request,

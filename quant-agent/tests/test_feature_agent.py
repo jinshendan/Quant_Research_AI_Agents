@@ -56,6 +56,8 @@ def test_feature_spec_normalizes_valid_payload(tmp_path: Path) -> None:
     assert spec.to_dict() == {
         "aligned_data_path": str(path.resolve()),
         "template_ids": ["return_3d", "close_to_open_return"],
+        "rolling_features": [],
+        "rolling_windows": [],
         "rank_transforms": [],
         "quantile_count": 5,
         "preview_rows": 3,
@@ -104,7 +106,9 @@ def test_feature_agent_generates_selected_factor_values(tmp_path: Path) -> None:
         "factor__close_position_in_range",
     ]
     assert response.output["base_factor_columns"] == response.output["factor_columns"]
+    assert response.output["rolling_feature_columns"] == []
     assert response.output["transformed_factor_columns"] == []
+    assert response.output["rolling_feature_stats"] == {}
     assert response.output["rank_transform_stats"] == {}
     assert len(response.output["preview"]) == 4
     assert response.metadata["agent"] == "FeatureAgent"
@@ -143,6 +147,35 @@ def test_feature_agent_generate_features_preserves_expected_values() -> None:
         & (result.data["date"] == pd.Timestamp("2024-01-04"))
     ].iloc[0]
     assert pd.isna(suspended_row["factor__close_to_open_return"])
+
+
+def test_feature_agent_applies_rolling_features(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path, days=8)
+    agent = FeatureAgent()
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "aligned_data_path": str(path),
+                "template_ids": ["close_to_open_return"],
+                "rolling_features": ["mean", "zscore"],
+                "rolling_windows": [3],
+                "preview_rows": 0,
+            }
+        )
+    )
+
+    assert response.status == "success"
+    assert response.output["base_factor_columns"] == ["factor__close_to_open_return"]
+    assert response.output["rolling_feature_columns"] == [
+        "factor__close_to_open_return__roll_mean_3",
+        "factor__close_to_open_return__roll_zscore_3",
+    ]
+    assert response.output["factor_count"] == 3
+    stats = response.output["rolling_feature_stats"]
+    assert stats["feature_names"] == ["mean", "zscore"]
+    assert stats["windows"] == [3]
+    assert stats["rolling_factor_count"] == 2
+    assert stats["counts_by_feature"] == {"mean": 1, "zscore": 1}
 
 
 def test_feature_agent_applies_rank_transforms(tmp_path: Path) -> None:
@@ -195,6 +228,25 @@ def test_feature_agent_returns_error_for_invalid_rank_transform(tmp_path: Path) 
 
     assert response.status == "error"
     assert "Unsupported rank transform" in str(response.error)
+
+
+def test_feature_agent_returns_error_for_invalid_rolling_feature(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path)
+    agent = FeatureAgent()
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "aligned_data_path": str(path),
+                "template_ids": ["close_to_open_return"],
+                "rolling_features": ["not_supported"],
+                "rolling_windows": [3],
+            }
+        )
+    )
+
+    assert response.status == "error"
+    assert "Unsupported rolling feature" in str(response.error)
 
 
 def test_feature_agent_runs_all_default_templates_when_ids_are_omitted(

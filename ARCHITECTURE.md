@@ -551,6 +551,46 @@ quantile
 Day 12 does not introduce new rolling-window factor families or persist factor
 matrices. Those remain scoped to Days 13 and 14.
 
+## Day 13 --- Rolling-Window Features
+
+Implemented in `quant-agent/`:
+
+-   per-symbol rolling-window feature transforms in
+    `quant-agent/agents/factor_rolling.py`
+-   validated `RollingFeatureSpec` request model
+-   rolling mean, standard deviation, min, max, and z-score transforms
+-   deterministic rolling column naming with window size
+-   rolling feature statistics for valid/missing values and transform counts
+-   optional FeatureAgent integration through `payload.rolling_features`
+-   `payload.rolling_windows` support for window sizing
+-   interaction with Day 12 ranking transforms by applying rolling features
+    before optional cross-sectional ranking transforms
+-   tests for rolling spec normalization, per-symbol rolling values, column
+    naming, invalid inputs, and FeatureAgent integration
+
+Current FeatureAgent rolling payload fields:
+
+```json
+{
+  "rolling_features": ["mean", "std", "zscore"],
+  "rolling_windows": [5, 20]
+}
+```
+
+Supported rolling features:
+
+```text
+mean
+std
+min
+max
+zscore
+```
+
+Day 13 computes rolling-window features in memory only. It does not persist
+factor matrices or evaluate performance. Factor persistence remains scoped to
+Day 14.
+
 ------------------------------------------------------------------------
 
 # Memory Schema
