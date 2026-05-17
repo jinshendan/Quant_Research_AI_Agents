@@ -151,3 +151,16 @@
 -   Memory storage
 -   Report generation
 -   Dashboard
+
+------------------------------------------------------------------------
+
+## Backlog --- Data Reliability
+
+-   Add retry with exponential backoff for AkShare/Eastmoney requests
+-   Add per-symbol failure isolation so one failed stock does not fail the
+    whole batch
+-   Record failed symbols, error messages, and retry counts into a failure
+    manifest
+-   Add structured logs for provider retries, skipped symbols, and final
+    download quality summary
+-   Add tests for transient provider failures and partial-success downloads
