@@ -5,12 +5,15 @@ inputs:
   - candidate_signals
   - factor_template_ids
   - target_count
+  - rank_transforms
+  - quantile_count
 outputs:
   - symbolic_factor_templates
   - generated_factors
   - generation_stats
   - factor_columns
   - feature_stats
+  - rank_transform_stats
   - factor_matrix_preview
   - required_columns
   - lookback_days
@@ -19,4 +22,5 @@ notes:
   - Day 9 defines symbolic templates.
   - Day 10 FeatureAgent computes factor values from aligned OHLCV data in memory.
   - Day 11 FactorGenerationAgent generates the first 50 symbolic candidate factors.
+  - Day 12 adds in-memory cross-sectional ranking transforms.
   - Day 14 will add durable factor-matrix persistence.

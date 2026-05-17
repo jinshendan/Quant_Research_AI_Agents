@@ -13,6 +13,7 @@ Input context:
 - template parameters
 - aligned market-data location
 - target factor count
+- optional cross-sectional rank transforms
 
 Rules:
 
@@ -23,7 +24,9 @@ Rules:
 - Keep missing or suspended rows explicit; do not silently forward-fill prices.
 - Return factor values separately from evaluation labels.
 - Keep candidate factor definitions separate from performance claims.
+- Apply cross-sectional transforms by date only, never across future dates.
 
-The current Day 11 implementation can generate the first 50 symbolic candidate
-factors in memory. Ranking transforms, durable factor-matrix persistence, and
-performance evaluation are deferred to later tasks.
+The current Day 12 implementation can append rank, percentile-rank, demean,
+z-score, and quantile transforms in memory. Rolling-window feature expansion,
+durable factor-matrix persistence, and performance evaluation are deferred to
+later tasks.

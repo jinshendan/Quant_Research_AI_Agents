@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-11：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent 和首批 50 个候选因子生成。
+> 当前项目处于早期搭建阶段。已完成 Day 1-12：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成和 ranking transforms。
 
 ## Why This Project
 
@@ -57,11 +57,12 @@ Implemented:
 - symbolic factor template library for Day 10 feature computation
 - `FeatureAgent` for computing template-based factor values from aligned OHLCV data
 - `FactorGenerationAgent` for generating the first deterministic 50 symbolic factors
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, and factor generation
+- cross-sectional ranking transforms for factor matrices
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, and ranking transforms
 
 Not implemented yet:
 
-- ranking transforms and factor persistence
+- rolling-window feature expansion and factor persistence
 - backtesting
 - memory and report generation
 - Streamlit dashboard
@@ -81,6 +82,7 @@ Not implemented yet:
     │   ├── duckdb_store.py
     │   ├── factor_generator.py
     │   ├── factor_templates.py
+    │   ├── factor_transforms.py
     │   ├── feature_agent.py
     │   ├── hypothesis_agent.py
     │   ├── market_data_cache.py
@@ -389,6 +391,19 @@ print(response.output["feature_stats"])
 If `template_ids` is omitted, FeatureAgent computes all currently supported
 default templates.
 
+FeatureAgent can also append cross-sectional ranking transforms by date:
+
+```python
+request = AgentRequest.create(
+    {
+        "aligned_data_path": "data/processed/aligned_ohlcv_akshare_CSI500_daily_none_20200101_20251231.csv",
+        "template_ids": ["return_5d"],
+        "rank_transforms": ["rank_pct", "zscore", "quantile"],
+        "quantile_count": 5,
+    }
+)
+```
+
 ## FactorGenerationAgent Example
 
 `FactorGenerationAgent` creates the first deterministic batch of symbolic
@@ -444,9 +459,10 @@ Week 1:
 - Day 9: symbolic factor templates
 - Day 10: FeatureAgent factor computation
 - Day 11: first 50 symbolic candidate factors
+- Day 12: cross-sectional ranking transforms
 
-Next steps cover ranking transforms, rolling-window features, factor
-persistence, backtesting, evaluation, memory, reporting, and dashboard.
+Next steps cover rolling-window features, factor persistence, backtesting,
+evaluation, memory, reporting, and dashboard.
 
 ## Engineering Principles
 

@@ -513,6 +513,44 @@ Day 11 generates symbolic candidate definitions only. It does not rank factors,
 persist generated matrices, execute all generated formulas in FeatureAgent, or
 evaluate alpha performance. Those remain scoped to Days 12-14 and Week 3.
 
+## Day 12 --- Ranking Transforms
+
+Implemented in `quant-agent/`:
+
+-   cross-sectional ranking transforms in
+    `quant-agent/agents/factor_transforms.py`
+-   validated `RankTransformSpec` request model
+-   rank, percentile-rank, demean, z-score, and quantile transforms by trading
+    date
+-   deterministic transformed column naming, including quantile bucket count
+-   transform statistics for valid/missing values and transform counts
+-   optional FeatureAgent integration through `payload.rank_transforms`
+-   `payload.quantile_count` support for quantile bucket sizing
+-   tests for transform normalization, cross-sectional transform values,
+    transformed column naming, invalid inputs, and FeatureAgent integration
+
+Current FeatureAgent ranking payload fields:
+
+```json
+{
+  "rank_transforms": ["rank_pct", "zscore", "quantile"],
+  "quantile_count": 5
+}
+```
+
+Supported transforms:
+
+```text
+rank
+rank_pct
+demean
+zscore
+quantile
+```
+
+Day 12 does not introduce new rolling-window factor families or persist factor
+matrices. Those remain scoped to Days 13 and 14.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

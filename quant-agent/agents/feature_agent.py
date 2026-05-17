@@ -10,6 +10,12 @@ import numpy as np
 import pandas as pd
 
 from agents.factor_templates import FactorTemplate, FactorTemplateLibrary
+from agents.factor_transforms import (
+    DEFAULT_QUANTILE_COUNT,
+    RankTransformSpec,
+    apply_rank_transforms,
+    validate_quantile_count,
+)
 from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
 
@@ -27,12 +33,24 @@ class FeatureSpec:
 
     aligned_data_path: Path
     template_ids: tuple[str, ...] = ()
+    rank_transforms: tuple[str, ...] = ()
+    quantile_count: int = DEFAULT_QUANTILE_COUNT
     preview_rows: int = DEFAULT_PREVIEW_ROWS
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> FeatureSpec:
         aligned_data_path = _required_path(payload, "aligned_data_path")
         template_ids = _optional_str_sequence(payload, "template_ids")
+        rank_transforms = _optional_str_sequence(payload, "rank_transforms")
+        quantile_count = validate_quantile_count(
+            _optional_int(
+                payload,
+                "quantile_count",
+                DEFAULT_QUANTILE_COUNT,
+                minimum=2,
+                maximum=20,
+            )
+        )
         preview_rows = _optional_int(
             payload,
             "preview_rows",
@@ -43,6 +61,8 @@ class FeatureSpec:
         return cls(
             aligned_data_path=aligned_data_path,
             template_ids=template_ids,
+            rank_transforms=rank_transforms,
+            quantile_count=quantile_count,
             preview_rows=preview_rows,
         )
 
@@ -50,6 +70,8 @@ class FeatureSpec:
         return {
             "aligned_data_path": str(self.aligned_data_path),
             "template_ids": list(self.template_ids),
+            "rank_transforms": list(self.rank_transforms),
+            "quantile_count": self.quantile_count,
             "preview_rows": self.preview_rows,
         }
 
@@ -60,7 +82,10 @@ class FeatureGenerationResult:
 
     data: pd.DataFrame
     factor_columns: tuple[str, ...]
+    base_factor_columns: tuple[str, ...]
+    transformed_factor_columns: tuple[str, ...]
     stats: dict[str, Any]
+    rank_transform_stats: dict[str, Any] | None = None
 
 
 class FeatureAgent:
@@ -104,7 +129,12 @@ class FeatureAgent:
             extra={"action": "generate_features", "status": "running"},
         )
         try:
-            result = self.generate_features(aligned_data, templates)
+            result = self.generate_features(
+                aligned_data,
+                templates,
+                rank_transform_names=spec.rank_transforms,
+                quantile_count=spec.quantile_count,
+            )
         except ValueError as exc:
             elapsed = perf_counter() - started_at
             self.logger.warning(
@@ -133,11 +163,15 @@ class FeatureAgent:
                 "request": spec.to_dict(),
                 "template_ids": template_ids,
                 "factor_columns": list(result.factor_columns),
+                "base_factor_columns": list(result.base_factor_columns),
+                "transformed_factor_columns": list(result.transformed_factor_columns),
+                "rank_transforms": list(spec.rank_transforms),
                 "row_count": len(result.data),
                 "factor_count": len(result.factor_columns),
                 "preview": _preview_records(result.data, spec.preview_rows),
                 "feature_stats": result.stats,
-                "next_action": "Generate first 50 factors in Day 11.",
+                "rank_transform_stats": result.rank_transform_stats or {},
+                "next_action": "Add rolling-window features in Day 13.",
             },
             metadata=self._metadata(
                 request,
@@ -161,6 +195,9 @@ class FeatureAgent:
         self,
         aligned_data: pd.DataFrame,
         templates: Sequence[FactorTemplate],
+        *,
+        rank_transform_names: Sequence[str] = (),
+        quantile_count: int = DEFAULT_QUANTILE_COUNT,
     ) -> FeatureGenerationResult:
         if not templates:
             msg = "At least one factor template is required."
@@ -176,11 +213,31 @@ class FeatureAgent:
             frame[factor_column] = _mask_untradable_rows(values, frame)
             factor_columns.append(factor_column)
 
+        base_factor_columns = tuple(factor_columns)
+        transformed_factor_columns: tuple[str, ...] = ()
+        rank_transform_stats: dict[str, Any] | None = None
+        if rank_transform_names:
+            transform_result = apply_rank_transforms(
+                frame[list(IDENTITY_COLUMNS) + factor_columns],
+                factor_columns=factor_columns,
+                spec=RankTransformSpec.create(
+                    rank_transform_names,
+                    quantile_count=quantile_count,
+                ),
+            )
+            frame = transform_result.data
+            transformed_factor_columns = transform_result.transformed_columns
+            factor_columns.extend(transformed_factor_columns)
+            rank_transform_stats = transform_result.stats
+
         stats = _feature_stats(frame, factor_columns)
         return FeatureGenerationResult(
             data=frame[list(IDENTITY_COLUMNS) + factor_columns].copy(),
             factor_columns=tuple(factor_columns),
+            base_factor_columns=base_factor_columns,
+            transformed_factor_columns=transformed_factor_columns,
             stats=stats,
+            rank_transform_stats=rank_transform_stats,
         )
 
     def _templates_for(self, spec: FeatureSpec) -> list[FactorTemplate]:

@@ -56,6 +56,8 @@ def test_feature_spec_normalizes_valid_payload(tmp_path: Path) -> None:
     assert spec.to_dict() == {
         "aligned_data_path": str(path.resolve()),
         "template_ids": ["return_3d", "close_to_open_return"],
+        "rank_transforms": [],
+        "quantile_count": 5,
         "preview_rows": 3,
     }
 
@@ -101,6 +103,9 @@ def test_feature_agent_generates_selected_factor_values(tmp_path: Path) -> None:
         "factor__close_to_open_return",
         "factor__close_position_in_range",
     ]
+    assert response.output["base_factor_columns"] == response.output["factor_columns"]
+    assert response.output["transformed_factor_columns"] == []
+    assert response.output["rank_transform_stats"] == {}
     assert len(response.output["preview"]) == 4
     assert response.metadata["agent"] == "FeatureAgent"
     assert response.metadata["task_id"] == "feature-task-1"
@@ -138,6 +143,58 @@ def test_feature_agent_generate_features_preserves_expected_values() -> None:
         & (result.data["date"] == pd.Timestamp("2024-01-04"))
     ].iloc[0]
     assert pd.isna(suspended_row["factor__close_to_open_return"])
+
+
+def test_feature_agent_applies_rank_transforms(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path)
+    agent = FeatureAgent()
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "aligned_data_path": str(path),
+                "template_ids": ["close_to_open_return"],
+                "rank_transforms": ["rank_pct", "zscore", "quantile"],
+                "quantile_count": 4,
+                "preview_rows": 0,
+            }
+        )
+    )
+
+    assert response.status == "success"
+    assert response.output["base_factor_columns"] == ["factor__close_to_open_return"]
+    assert response.output["transformed_factor_columns"] == [
+        "factor__close_to_open_return__rank_pct",
+        "factor__close_to_open_return__zscore",
+        "factor__close_to_open_return__quantile_4",
+    ]
+    assert response.output["factor_count"] == 4
+    stats = response.output["rank_transform_stats"]
+    assert stats["transform_names"] == ["rank_pct", "zscore", "quantile"]
+    assert stats["quantile_count"] == 4
+    assert stats["transformed_factor_count"] == 3
+    assert stats["counts_by_transform"] == {
+        "quantile": 1,
+        "rank_pct": 1,
+        "zscore": 1,
+    }
+
+
+def test_feature_agent_returns_error_for_invalid_rank_transform(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path)
+    agent = FeatureAgent()
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "aligned_data_path": str(path),
+                "template_ids": ["close_to_open_return"],
+                "rank_transforms": ["not_supported"],
+            }
+        )
+    )
+
+    assert response.status == "error"
+    assert "Unsupported rank transform" in str(response.error)
 
 
 def test_feature_agent_runs_all_default_templates_when_ids_are_omitted(

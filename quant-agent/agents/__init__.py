@@ -10,6 +10,11 @@ from agents.factor_templates import (
     FactorTemplate,
     FactorTemplateLibrary,
 )
+from agents.factor_transforms import (
+    RankTransformResult,
+    RankTransformSpec,
+    apply_rank_transforms,
+)
 from agents.factor_generator import (
     FactorBatchResult,
     FactorCandidateGenerator,
@@ -56,6 +61,8 @@ __all__ = [
     "FactorGenerationSpec",
     "FactorTemplate",
     "FactorTemplateLibrary",
+    "RankTransformResult",
+    "RankTransformSpec",
     "FeatureAgent",
     "FeatureGenerationResult",
     "FeatureSpec",
@@ -74,5 +81,6 @@ __all__ = [
     "OhlcvCleanResult",
     "TradingCalendarProvider",
     "align_to_trading_calendar",
+    "apply_rank_transforms",
     "clean_ohlcv",
 ]
