@@ -420,6 +420,52 @@ Day 9 intentionally defines symbolic formulas only. It does not compute factor
 values, save factor matrices, or evaluate performance. FeatureAgent on Day 10
 will execute these templates against aligned OHLCV data.
 
+## Day 10 --- FeatureAgent
+
+Implemented in `quant-agent/`:
+
+-   factor computation agent in `quant-agent/agents/feature_agent.py`
+-   validated `FeatureSpec` request model
+-   aligned OHLCV CSV loading and normalization
+-   template selection through `FactorTemplateLibrary`
+-   pandas execution paths for all current Day 9 default templates
+-   per-symbol rolling, delay, percent-change, z-score, drawdown, breakout, and
+    candle-position calculations
+-   masking of `is_suspended_or_missing` rows without forward-filling prices
+-   factor matrix preview and per-factor valid/missing value statistics
+-   standardized `AgentRequest` and `AgentResponse` envelopes
+-   structured logs for validation and factor generation
+-   tests for request validation, selected templates, default-template
+    execution, expected values, missing files, unknown templates, and missing
+    required columns
+
+Current FeatureAgent payload:
+
+```json
+{
+  "aligned_data_path": "data/processed/aligned_ohlcv_akshare_CSI500_daily_none_20200101_20251231.csv",
+  "template_ids": ["return_5d", "volume_ratio_5d_20d"],
+  "preview_rows": 5
+}
+```
+
+Current FeatureAgent output:
+
+```text
+state = features_generated
+template_ids
+factor_columns
+row_count
+factor_count
+preview
+feature_stats
+```
+
+Day 10 computes factor values in memory only. It does not yet generate the
+first large factor batch, add ranking transforms, expand rolling-window feature
+families, save factor matrices, or evaluate performance. Those remain scoped to
+Days 11-14 and Week 3.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

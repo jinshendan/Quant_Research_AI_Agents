@@ -10,6 +10,11 @@ from agents.factor_templates import (
     FactorTemplate,
     FactorTemplateLibrary,
 )
+from agents.feature_agent import (
+    FeatureAgent,
+    FeatureGenerationResult,
+    FeatureSpec,
+)
 from agents.hypothesis_agent import (
     HypothesisAgent,
     HypothesisSpec,
@@ -38,6 +43,9 @@ __all__ = [
     "DuckDBMarketDataStore",
     "FactorTemplate",
     "FactorTemplateLibrary",
+    "FeatureAgent",
+    "FeatureGenerationResult",
+    "FeatureSpec",
     "HypothesisAgent",
     "HypothesisSpec",
     "HypothesisTemplate",

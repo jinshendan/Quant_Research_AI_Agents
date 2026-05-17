@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-9：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent 和因子模板库。
+> 当前项目处于早期搭建阶段。已完成 Day 1-10：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库和 FeatureAgent。
 
 ## Why This Project
 
@@ -55,11 +55,12 @@ Implemented:
 - file-backed market data cache with cache-hit and force-refresh behavior
 - `HypothesisAgent` for structured alpha hypothesis generation
 - symbolic factor template library for Day 10 feature computation
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, and factor templates
+- `FeatureAgent` for computing template-based factor values from aligned OHLCV data
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, and FeatureAgent behavior
 
 Not implemented yet:
 
-- feature generation
+- bulk factor generation and persistence
 - backtesting
 - memory and report generation
 - Streamlit dashboard
@@ -78,6 +79,7 @@ Not implemented yet:
     │   ├── data_agent.py
     │   ├── duckdb_store.py
     │   ├── factor_templates.py
+    │   ├── feature_agent.py
     │   ├── hypothesis_agent.py
     │   ├── market_data_cache.py
     │   ├── market_data_provider.py
@@ -334,8 +336,7 @@ feature generation.
 
 The Day 9 template library maps HypothesisAgent candidate signals to symbolic
 factor definitions. Templates define the formula, required columns, lookback
-window, expected direction, and risk flags. They do not compute factor values
-yet; Day 10 FeatureAgent will execute them against aligned OHLCV data.
+window, expected direction, and risk flags.
 
 ```python
 from agents.factor_templates import FactorTemplateLibrary
@@ -358,6 +359,33 @@ print(template_map[0]["templates"])
 
 Default templates currently cover liquidity, momentum, reversal, volatility,
 breakout, price-action, and risk-adjusted momentum signals.
+
+## FeatureAgent Example
+
+`FeatureAgent` computes selected factor templates against an aligned OHLCV CSV.
+It keeps `symbol` and `date`, masks suspended or missing rows, and returns a
+small preview plus quality statistics. Saving full factor matrices is deferred
+to Day 14.
+
+```python
+from agents.feature_agent import FeatureAgent
+from core.models import AgentRequest
+
+request = AgentRequest.create(
+    {
+        "aligned_data_path": "data/processed/aligned_ohlcv_akshare_CSI500_daily_none_20200101_20251231.csv",
+        "template_ids": ["return_5d", "volume_ratio_5d_20d"],
+        "preview_rows": 5,
+    }
+)
+
+response = FeatureAgent().run(request)
+print(response.output["factor_columns"])
+print(response.output["feature_stats"])
+```
+
+If `template_ids` is omitted, FeatureAgent computes all currently supported
+default templates.
 
 ## Configuration
 
@@ -391,9 +419,10 @@ Week 1:
 - Day 7: file-backed market data cache
 - Day 8: structured HypothesisAgent
 - Day 9: symbolic factor templates
+- Day 10: FeatureAgent factor computation
 
-Next steps cover feature generation, backtesting, evaluation, memory, reporting,
-and dashboard.
+Next steps cover bulk factor generation, ranking transforms, rolling-window
+features, backtesting, evaluation, memory, reporting, and dashboard.
 
 ## Engineering Principles
 

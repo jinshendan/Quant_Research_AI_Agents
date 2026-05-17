@@ -6,9 +6,13 @@ inputs:
   - factor_template_ids
 outputs:
   - symbolic_factor_templates
+  - factor_columns
+  - feature_stats
+  - factor_matrix_preview
   - required_columns
   - lookback_days
   - risk_flags
 notes:
-  - Day 9 defines symbolic templates only.
-  - Day 10 FeatureAgent will compute factor values from aligned OHLCV data.
+  - Day 9 defines symbolic templates.
+  - Day 10 FeatureAgent computes factor values from aligned OHLCV data in memory.
+  - Day 14 will add durable factor-matrix persistence.

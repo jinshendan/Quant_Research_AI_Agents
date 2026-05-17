@@ -21,5 +21,6 @@ Rules:
 - Keep missing or suspended rows explicit; do not silently forward-fill prices.
 - Return factor values separately from evaluation labels.
 
-The current Day 9 implementation only defines symbolic templates. FeatureAgent
-will implement execution of these templates in Day 10.
+The current Day 10 implementation computes template-based factor values in
+memory. Saving generated factor matrices and producing larger factor batches
+are deferred to later tasks.
