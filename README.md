@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-4：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载和基础清洗。
+> 当前项目处于早期搭建阶段。已完成 Day 1-5：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗和交易日历对齐。
 
 ## Why This Project
 
@@ -49,11 +49,12 @@ Implemented:
 - raw data CSV persistence
 - processed data CSV persistence
 - row-level cleaning for missing values, duplicates, invalid prices, and no-trade/suspended rows
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, and OHLCV cleaning
+- trading-calendar alignment for symbol/date grids
+- aligned data CSV persistence
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, and calendar alignment
 
 Not implemented yet:
 
-- trading-calendar alignment
 - DuckDB persistence
 - factor generation
 - backtesting
@@ -73,7 +74,8 @@ Not implemented yet:
     │   ├── __init__.py
     │   ├── data_agent.py
     │   ├── market_data_provider.py
-    │   └── ohlcv_cleaner.py
+    │   ├── ohlcv_cleaner.py
+    │   └── trading_calendar.py
     ├── core/
     │   ├── __init__.py
     │   ├── config.py
@@ -160,7 +162,8 @@ python -m mypy core agents tests app.py
 The current `DataAgent` validates a market data request, downloads raw A-share
 OHLCV data through AkShare, normalizes the schema, writes a raw CSV into
 `data/raw/`, cleans row-level quality issues, and writes a processed CSV into
-`data/processed/`.
+`data/processed/`. It then aligns processed data to the exchange trading
+calendar and writes an `aligned_*.csv` file into `data/processed/`.
 
 ```python
 from agents.data_agent import DataAgent
@@ -223,8 +226,14 @@ Current cleaning rules:
 - drop no-trade rows where `volume <= 0` or `amount <= 0`
 - fill optional numeric fields with `0.0` after invalid rows are removed
 
-Trading-calendar alignment is still pending, so suspended days that are absent
-from the provider output are handled in Day 5.
+Aligned files add:
+
+```text
+is_expected_trading_day, is_suspended_or_missing
+```
+
+Missing symbol/date rows are retained with null OHLCV fields and
+`is_suspended_or_missing = True`. The system does not forward-fill prices.
 
 ## Configuration
 

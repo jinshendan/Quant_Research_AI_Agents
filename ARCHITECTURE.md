@@ -196,6 +196,38 @@ Trading-calendar alignment remains intentionally deferred to Day 5. Suspended
 days that are absent from the provider output cannot be inferred until the
 calendar alignment step introduces the expected trading date grid.
 
+## Day 5 --- Trading Calendar Alignment
+
+Implemented in `quant-agent/`:
+
+-   trading-calendar provider boundary in `quant-agent/agents/trading_calendar.py`
+-   AkShare/Sina trading calendar integration through
+    `tool_trade_date_hist_sina`
+-   symbol/date grid alignment for processed OHLCV data
+-   aligned OHLCV CSV persistence into `data/processed/` with an `aligned_`
+    filename prefix
+-   DataAgent output fields for aligned data paths and calendar statistics
+-   tests for calendar filtering, missing symbol/date rows, and DataAgent
+    aligned-file output
+
+Aligned data adds:
+
+```text
+is_expected_trading_day, is_suspended_or_missing
+```
+
+Alignment rules:
+
+-   build the expected grid from resolved symbols and exchange trading days
+-   preserve observed OHLCV values from the processed dataset
+-   retain missing symbol/date rows with null OHLCV values
+-   mark missing symbol/date rows as `is_suspended_or_missing = True`
+-   avoid price or volume imputation
+
+This gives later factor logic an explicit view of missing/suspended sessions
+without introducing forward-filled prices. DuckDB persistence is intentionally
+deferred to Day 6.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

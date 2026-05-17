@@ -20,6 +20,11 @@ from agents.market_data_provider import (
     combine_ohlcv_frames,
 )
 from agents.ohlcv_cleaner import clean_ohlcv
+from agents.trading_calendar import (
+    AkShareTradingCalendarProvider,
+    TradingCalendarProvider,
+    align_to_trading_calendar,
+)
 
 SUPPORTED_FREQUENCIES = {"daily"}
 SUPPORTED_PROVIDERS = {"akshare"}
@@ -96,12 +101,18 @@ class DataAgent:
         config: AppConfig | None = None,
         logger: AgentLoggerAdapter | None = None,
         providers: Mapping[str, MarketDataProvider] | None = None,
+        calendar_providers: Mapping[str, TradingCalendarProvider] | None = None,
     ) -> None:
         self.config = config or AppConfig.from_env()
         self.logger = logger or get_agent_logger(self.name)
         self.providers = dict(providers) if providers is not None else {
             "akshare": AkShareMarketDataProvider()
         }
+        self.calendar_providers = (
+            dict(calendar_providers)
+            if calendar_providers is not None
+            else {"akshare": AkShareTradingCalendarProvider()}
+        )
 
     def run(self, request: AgentRequest) -> AgentResponse:
         started_at = perf_counter()
@@ -114,6 +125,7 @@ class DataAgent:
             spec = MarketDataSpec.from_payload(request.payload)
             self.config.ensure_directories()
             provider = self._provider_for(spec.provider)
+            calendar_provider = self._calendar_provider_for(spec.provider)
             symbols = list(spec.symbols) or provider.resolve_symbols(spec.universe)
         except (RuntimeError, ValueError) as exc:
             elapsed = perf_counter() - started_at
@@ -136,10 +148,20 @@ class DataAgent:
             raw_data_path = self.save_raw_ohlcv(market_data, spec)
             clean_result = clean_ohlcv(market_data)
             processed_data_path = self.save_processed_ohlcv(clean_result.data, spec)
+            trading_days = calendar_provider.get_trading_days(
+                start_date=spec.start_date,
+                end_date=spec.end_date,
+            )
+            calendar_result = align_to_trading_calendar(
+                clean_result.data,
+                symbols=symbols,
+                trading_days=trading_days,
+            )
+            aligned_data_path = self.save_aligned_ohlcv(calendar_result.data, spec)
         except Exception as exc:
             elapsed = perf_counter() - started_at
             self.logger.exception(
-                "Market data download or cleaning failed.",
+                "Market data preparation failed.",
                 extra={"action": "prepare_ohlcv", "status": "error"},
             )
             return AgentResponse.failure(
@@ -155,21 +177,24 @@ class DataAgent:
 
         elapsed = perf_counter() - started_at
         self.logger.info(
-            "Downloaded, cleaned, and stored OHLCV data.",
+            "Downloaded, cleaned, aligned, and stored OHLCV data.",
             extra={"action": "prepare_ohlcv", "status": "success"},
         )
         return AgentResponse.success(
             output={
-                "state": "processed",
+                "state": "aligned",
                 "request": spec.to_dict(),
                 "symbols": symbols,
                 "raw_rows": len(market_data),
                 "processed_rows": len(clean_result.data),
-                "columns": list(clean_result.data.columns),
+                "aligned_rows": len(calendar_result.data),
+                "columns": list(calendar_result.data.columns),
                 "raw_data_path": str(raw_data_path),
                 "processed_data_path": str(processed_data_path),
+                "aligned_data_path": str(aligned_data_path),
                 "cleaning_stats": clean_result.stats,
-                "next_action": "Align trading calendar in Day 5.",
+                "calendar_stats": calendar_result.stats,
+                "next_action": "Store data into DuckDB in Day 6.",
             },
             metadata=self._metadata(
                 request,
@@ -177,10 +202,12 @@ class DataAgent:
                 provider=spec.provider,
                 frequency=spec.frequency,
                 symbols_count=len(symbols),
-                rows=len(clean_result.data),
+                rows=len(calendar_result.data),
                 raw_data_path=raw_data_path,
                 processed_data_path=processed_data_path,
+                aligned_data_path=aligned_data_path,
                 cleaning_stats=clean_result.stats,
+                calendar_stats=calendar_result.stats,
             ),
         )
 
@@ -226,6 +253,12 @@ class DataAgent:
         clean_data.to_csv(output_path, index=False, date_format="%Y-%m-%d")
         return output_path
 
+    def save_aligned_ohlcv(self, aligned_data: pd.DataFrame, spec: MarketDataSpec) -> Path:
+        output_path = self._aligned_ohlcv_path(spec)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        aligned_data.to_csv(output_path, index=False, date_format="%Y-%m-%d")
+        return output_path
+
     def _metadata(
         self,
         request: AgentRequest,
@@ -237,7 +270,9 @@ class DataAgent:
         rows: int | None = None,
         raw_data_path: Path | None = None,
         processed_data_path: Path | None = None,
+        aligned_data_path: Path | None = None,
         cleaning_stats: dict[str, int] | None = None,
+        calendar_stats: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -259,8 +294,12 @@ class DataAgent:
             metadata["raw_data_path"] = str(raw_data_path)
         if processed_data_path is not None:
             metadata["processed_data_path"] = str(processed_data_path)
+        if aligned_data_path is not None:
+            metadata["aligned_data_path"] = str(aligned_data_path)
         if cleaning_stats is not None:
             metadata["cleaning_stats"] = cleaning_stats
+        if calendar_stats is not None:
+            metadata["calendar_stats"] = calendar_stats
         return metadata
 
     def _provider_for(self, provider_name: str) -> MarketDataProvider:
@@ -270,11 +309,21 @@ class DataAgent:
             raise RuntimeError(msg)
         return provider
 
+    def _calendar_provider_for(self, provider_name: str) -> TradingCalendarProvider:
+        provider = self.calendar_providers.get(provider_name)
+        if provider is None:
+            msg = f"No trading calendar provider configured for: {provider_name}."
+            raise RuntimeError(msg)
+        return provider
+
     def _raw_ohlcv_path(self, spec: MarketDataSpec) -> Path:
         return self.config.raw_data_dir / self._ohlcv_filename(spec)
 
     def _processed_ohlcv_path(self, spec: MarketDataSpec) -> Path:
         return self.config.processed_data_dir / self._ohlcv_filename(spec)
+
+    def _aligned_ohlcv_path(self, spec: MarketDataSpec) -> Path:
+        return self.config.processed_data_dir / f"aligned_{self._ohlcv_filename(spec)}"
 
     def _ohlcv_filename(self, spec: MarketDataSpec) -> str:
         safe_universe = _safe_filename(spec.universe)

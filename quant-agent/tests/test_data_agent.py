@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from io import StringIO
 from pathlib import Path
 
@@ -51,6 +52,17 @@ class FakeMarketDataProvider:
                 }
             ]
         )
+
+
+class FakeTradingCalendarProvider:
+    name = "akshare"
+
+    def get_trading_days(self, *, start_date: date, end_date: date) -> list[date]:
+        return [
+            pd.Timestamp(start_date).date(),
+            pd.Timestamp("2020-01-02").date(),
+            pd.Timestamp(end_date).date(),
+        ]
 
 
 def test_market_data_spec_normalizes_valid_payload() -> None:
@@ -107,6 +119,7 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
         config=_config(tmp_path),
         logger=get_agent_logger("DataAgent"),
         providers={"akshare": FakeMarketDataProvider()},
+        calendar_providers={"akshare": FakeTradingCalendarProvider()},
     )
     request = AgentRequest.create(
         {
@@ -120,18 +133,22 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     response = agent.run(request)
 
     assert response.status == "success"
-    assert response.output["state"] == "processed"
+    assert response.output["state"] == "aligned"
     assert response.output["raw_rows"] == 2
     assert response.output["processed_rows"] == 2
+    assert response.output["aligned_rows"] == 6
     assert response.output["symbols"] == ["000001", "000002"]
     assert response.output["request"]["provider"] == "akshare"
     assert Path(response.output["raw_data_path"]).is_file()
     assert Path(response.output["processed_data_path"]).is_file()
+    assert Path(response.output["aligned_data_path"]).is_file()
     assert response.output["cleaning_stats"]["suspended_rows"] == 0
+    assert response.output["calendar_stats"]["missing_or_suspended_rows"] == 4
     assert response.metadata["agent"] == "DataAgent"
     assert response.metadata["task_id"] == "data-task-1"
-    assert response.metadata["rows"] == 2
+    assert response.metadata["rows"] == 6
     assert response.metadata["cleaning_stats"]["output_rows"] == 2
+    assert response.metadata["calendar_stats"]["output_rows"] == 6
     assert (tmp_path / "data" / "raw").is_dir()
     assert (tmp_path / "data" / "processed").is_dir()
     assert "DataAgent | prepare_ohlcv | success" in stream.getvalue()
@@ -140,6 +157,9 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     assert list(stored["symbol"].astype(str).str.zfill(6)) == ["000001", "000002"]
     processed = pd.read_csv(response.output["processed_data_path"])
     assert list(processed["symbol"].astype(str).str.zfill(6)) == ["000001", "000002"]
+    aligned = pd.read_csv(response.output["aligned_data_path"])
+    assert len(aligned) == 6
+    assert aligned["is_suspended_or_missing"].sum() == 4
 
 
 def test_data_agent_run_returns_error_for_bad_payload(tmp_path: Path) -> None:
@@ -149,6 +169,7 @@ def test_data_agent_run_returns_error_for_bad_payload(tmp_path: Path) -> None:
         config=_config(tmp_path),
         logger=get_agent_logger("DataAgent"),
         providers={"akshare": FakeMarketDataProvider()},
+        calendar_providers={"akshare": FakeTradingCalendarProvider()},
     )
     request = AgentRequest.create({"universe": "", "start_date": "2020-01-01"})
 
@@ -164,6 +185,7 @@ def test_data_agent_download_ohlcv_uses_explicit_symbols(tmp_path: Path) -> None
     agent = DataAgent(
         config=_config(tmp_path),
         providers={"akshare": FakeMarketDataProvider()},
+        calendar_providers={"akshare": FakeTradingCalendarProvider()},
     )
     spec = MarketDataSpec.from_payload(
         {
