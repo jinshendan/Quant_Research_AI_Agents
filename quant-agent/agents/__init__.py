@@ -10,6 +10,14 @@ from agents.factor_templates import (
     FactorTemplate,
     FactorTemplateLibrary,
 )
+from agents.factor_generator import (
+    FactorBatchResult,
+    FactorCandidateGenerator,
+    FactorFamily,
+    FactorGenerationAgent,
+    FactorGenerationSpec,
+    GeneratedFactor,
+)
 from agents.feature_agent import (
     FeatureAgent,
     FeatureGenerationResult,
@@ -41,11 +49,17 @@ __all__ = [
     "CalendarAlignmentResult",
     "DataAgent",
     "DuckDBMarketDataStore",
+    "FactorBatchResult",
+    "FactorCandidateGenerator",
+    "FactorFamily",
+    "FactorGenerationAgent",
+    "FactorGenerationSpec",
     "FactorTemplate",
     "FactorTemplateLibrary",
     "FeatureAgent",
     "FeatureGenerationResult",
     "FeatureSpec",
+    "GeneratedFactor",
     "HypothesisAgent",
     "HypothesisSpec",
     "HypothesisTemplate",

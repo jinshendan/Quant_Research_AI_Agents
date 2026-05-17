@@ -466,6 +466,53 @@ first large factor batch, add ranking transforms, expand rolling-window feature
 families, save factor matrices, or evaluate performance. Those remain scoped to
 Days 11-14 and Week 3.
 
+## Day 11 --- First 50 Factor Candidates
+
+Implemented in `quant-agent/`:
+
+-   deterministic factor candidate generation in
+    `quant-agent/agents/factor_generator.py`
+-   validated `FactorGenerationSpec` request model
+-   `FactorFamily` definitions that expand into symbolic candidate factors
+-   `GeneratedFactor` schema for alpha id, source template, expression,
+    direction, required columns, parameters, lookback window, signal tags, and
+    risk flags
+-   `FactorCandidateGenerator` for in-memory factor batch generation
+-   `FactorGenerationAgent` with standardized `AgentRequest` and
+    `AgentResponse` envelopes
+-   default generation of `alpha_001` through `alpha_050`
+-   source-template filtering for focused candidate batches
+-   future-looking expression guardrails for obvious `future_`, `lead(...)`,
+    and negative-shift tokens
+-   generation statistics for category counts, source-template counts, unique
+    expression count, and maximum lookback
+-   tests for spec validation, default 50-factor generation, filtering,
+    unknown sources, insufficient candidates, agent responses, and future-token
+    rejection
+
+Current FactorGenerationAgent payload:
+
+```json
+{
+  "target_count": 50,
+  "source_template_ids": []
+}
+```
+
+Current FactorGenerationAgent output:
+
+```text
+state = factors_generated
+factor_count
+generation_method
+factors[]
+generation_stats
+```
+
+Day 11 generates symbolic candidate definitions only. It does not rank factors,
+persist generated matrices, execute all generated formulas in FeatureAgent, or
+evaluate alpha performance. Those remain scoped to Days 12-14 and Week 3.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

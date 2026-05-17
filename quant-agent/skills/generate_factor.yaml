@@ -4,8 +4,11 @@ inputs:
   - hypothesis_id
   - candidate_signals
   - factor_template_ids
+  - target_count
 outputs:
   - symbolic_factor_templates
+  - generated_factors
+  - generation_stats
   - factor_columns
   - feature_stats
   - factor_matrix_preview
@@ -15,4 +18,5 @@ outputs:
 notes:
   - Day 9 defines symbolic templates.
   - Day 10 FeatureAgent computes factor values from aligned OHLCV data in memory.
+  - Day 11 FactorGenerationAgent generates the first 50 symbolic candidate factors.
   - Day 14 will add durable factor-matrix persistence.

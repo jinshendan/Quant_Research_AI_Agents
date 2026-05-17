@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-10：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库和 FeatureAgent。
+> 当前项目处于早期搭建阶段。已完成 Day 1-11：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent 和首批 50 个候选因子生成。
 
 ## Why This Project
 
@@ -56,11 +56,12 @@ Implemented:
 - `HypothesisAgent` for structured alpha hypothesis generation
 - symbolic factor template library for Day 10 feature computation
 - `FeatureAgent` for computing template-based factor values from aligned OHLCV data
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, and FeatureAgent behavior
+- `FactorGenerationAgent` for generating the first deterministic 50 symbolic factors
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, and factor generation
 
 Not implemented yet:
 
-- bulk factor generation and persistence
+- ranking transforms and factor persistence
 - backtesting
 - memory and report generation
 - Streamlit dashboard
@@ -78,6 +79,7 @@ Not implemented yet:
     │   ├── __init__.py
     │   ├── data_agent.py
     │   ├── duckdb_store.py
+    │   ├── factor_generator.py
     │   ├── factor_templates.py
     │   ├── feature_agent.py
     │   ├── hypothesis_agent.py
@@ -387,6 +389,27 @@ print(response.output["feature_stats"])
 If `template_ids` is omitted, FeatureAgent computes all currently supported
 default templates.
 
+## FactorGenerationAgent Example
+
+`FactorGenerationAgent` creates the first deterministic batch of symbolic
+candidate factors. It generates factor definitions only; ranking transforms,
+durable storage, and performance evaluation remain separate later steps.
+
+```python
+from agents.factor_generator import FactorGenerationAgent
+from core.models import AgentRequest
+
+request = AgentRequest.create({"target_count": 50})
+response = FactorGenerationAgent().run(request)
+
+print(response.output["factor_count"])
+print(response.output["factors"][0])
+```
+
+Generated factors are named `alpha_001` through `alpha_050` by default and
+include source template id, expression, direction, required columns, parameters,
+lookback window, signal tags, and risk flags.
+
 ## Configuration
 
 `AppConfig` reads optional environment variables:
@@ -420,9 +443,10 @@ Week 1:
 - Day 8: structured HypothesisAgent
 - Day 9: symbolic factor templates
 - Day 10: FeatureAgent factor computation
+- Day 11: first 50 symbolic candidate factors
 
-Next steps cover bulk factor generation, ranking transforms, rolling-window
-features, backtesting, evaluation, memory, reporting, and dashboard.
+Next steps cover ranking transforms, rolling-window features, factor
+persistence, backtesting, evaluation, memory, reporting, and dashboard.
 
 ## Engineering Principles
 
