@@ -4,6 +4,7 @@ from datetime import date
 from io import StringIO
 from pathlib import Path
 
+import duckdb  # type: ignore[import-untyped]
 import pandas as pd
 import pytest
 
@@ -133,7 +134,7 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     response = agent.run(request)
 
     assert response.status == "success"
-    assert response.output["state"] == "aligned"
+    assert response.output["state"] == "stored"
     assert response.output["raw_rows"] == 2
     assert response.output["processed_rows"] == 2
     assert response.output["aligned_rows"] == 6
@@ -144,11 +145,14 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     assert Path(response.output["aligned_data_path"]).is_file()
     assert response.output["cleaning_stats"]["suspended_rows"] == 0
     assert response.output["calendar_stats"]["missing_or_suspended_rows"] == 4
+    assert response.output["storage_stats"]["rows_written"] == 6
+    assert Path(response.output["storage_stats"]["database_path"]).is_file()
     assert response.metadata["agent"] == "DataAgent"
     assert response.metadata["task_id"] == "data-task-1"
     assert response.metadata["rows"] == 6
     assert response.metadata["cleaning_stats"]["output_rows"] == 2
     assert response.metadata["calendar_stats"]["output_rows"] == 6
+    assert response.metadata["storage_stats"]["rows_written"] == 6
     assert (tmp_path / "data" / "raw").is_dir()
     assert (tmp_path / "data" / "processed").is_dir()
     assert "DataAgent | prepare_ohlcv | success" in stream.getvalue()
@@ -160,6 +164,12 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     aligned = pd.read_csv(response.output["aligned_data_path"])
     assert len(aligned) == 6
     assert aligned["is_suspended_or_missing"].sum() == 4
+
+    with duckdb.connect(response.output["storage_stats"]["database_path"]) as connection:
+        stored_rows = connection.execute("SELECT count(*) FROM market_ohlcv_aligned").fetchone()
+        run_rows = connection.execute("SELECT count(*) FROM market_data_runs").fetchone()
+    assert stored_rows == (6,)
+    assert run_rows == (1,)
 
 
 def test_data_agent_run_returns_error_for_bad_payload(tmp_path: Path) -> None:

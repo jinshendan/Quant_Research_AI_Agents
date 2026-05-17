@@ -228,6 +228,51 @@ This gives later factor logic an explicit view of missing/suspended sessions
 without introducing forward-filled prices. DuckDB persistence is intentionally
 deferred to Day 6.
 
+## Day 6 --- DuckDB Persistence
+
+Implemented in `quant-agent/`:
+
+-   DuckDB storage module in `quant-agent/agents/duckdb_store.py`
+-   configurable database path through `AppConfig.duckdb_path`
+-   default database at `data/processed/quant_agent.duckdb`
+-   DataAgent persistence into DuckDB after raw, processed, and aligned CSVs
+    are written
+-   replacement writes for the same provider/universe/frequency/adjust,
+    symbol set, and date range
+-   run metadata table for data lineage and quality statistics
+-   tests for DuckDB row writes, run metadata, replacement behavior, and
+    DataAgent end-to-end persistence
+
+Current DuckDB tables:
+
+```text
+market_ohlcv_aligned
+market_data_runs
+```
+
+`market_ohlcv_aligned` stores aligned OHLCV rows plus run context:
+
+```text
+run_id, universe, provider, frequency, adjust,
+date, symbol, open, high, low, close, volume, amount,
+amplitude, pct_change, price_change, turnover_rate,
+is_expected_trading_day, is_suspended_or_missing, updated_at
+```
+
+`market_data_runs` stores lineage:
+
+```text
+run_id, task_id, universe, provider, frequency, adjust,
+start_date, end_date,
+raw_data_path, processed_data_path, aligned_data_path,
+raw_rows, processed_rows, aligned_rows, rows_written,
+cleaning_stats_json, calendar_stats_json, created_at
+```
+
+Cache semantics are intentionally deferred to Day 7. Day 6 only persists the
+latest prepared result for the requested symbol/date range and records run
+metadata.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

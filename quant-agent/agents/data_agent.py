@@ -14,6 +14,11 @@ from core.config import AppConfig
 from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
 
+from agents.duckdb_store import (
+    DuckDBMarketDataStore,
+    MarketDataStorageContext,
+    MarketDataStorageResult,
+)
 from agents.market_data_provider import (
     AkShareMarketDataProvider,
     MarketDataProvider,
@@ -102,6 +107,7 @@ class DataAgent:
         logger: AgentLoggerAdapter | None = None,
         providers: Mapping[str, MarketDataProvider] | None = None,
         calendar_providers: Mapping[str, TradingCalendarProvider] | None = None,
+        market_data_store: DuckDBMarketDataStore | None = None,
     ) -> None:
         self.config = config or AppConfig.from_env()
         self.logger = logger or get_agent_logger(self.name)
@@ -113,6 +119,7 @@ class DataAgent:
             if calendar_providers is not None
             else {"akshare": AkShareTradingCalendarProvider()}
         )
+        self.market_data_store = market_data_store or DuckDBMarketDataStore(self.config.duckdb_path)
 
     def run(self, request: AgentRequest) -> AgentResponse:
         started_at = perf_counter()
@@ -158,10 +165,31 @@ class DataAgent:
                 trading_days=trading_days,
             )
             aligned_data_path = self.save_aligned_ohlcv(calendar_result.data, spec)
+            storage_result = self.market_data_store.store_aligned_ohlcv(
+                calendar_result.data,
+                context=MarketDataStorageContext(
+                    run_id=request.task_id,
+                    task_id=request.task_id,
+                    universe=spec.universe,
+                    provider=spec.provider,
+                    frequency=spec.frequency,
+                    adjust=spec.adjust,
+                    start_date=spec.start_date.isoformat(),
+                    end_date=spec.end_date.isoformat(),
+                    raw_data_path=str(raw_data_path),
+                    processed_data_path=str(processed_data_path),
+                    aligned_data_path=str(aligned_data_path),
+                    raw_rows=len(market_data),
+                    processed_rows=len(clean_result.data),
+                    aligned_rows=len(calendar_result.data),
+                    cleaning_stats=clean_result.stats,
+                    calendar_stats=calendar_result.stats,
+                ),
+            )
         except Exception as exc:
             elapsed = perf_counter() - started_at
             self.logger.exception(
-                "Market data preparation failed.",
+                "Market data preparation or storage failed.",
                 extra={"action": "prepare_ohlcv", "status": "error"},
             )
             return AgentResponse.failure(
@@ -177,12 +205,12 @@ class DataAgent:
 
         elapsed = perf_counter() - started_at
         self.logger.info(
-            "Downloaded, cleaned, aligned, and stored OHLCV data.",
+            "Downloaded, cleaned, aligned, and persisted OHLCV data.",
             extra={"action": "prepare_ohlcv", "status": "success"},
         )
         return AgentResponse.success(
             output={
-                "state": "aligned",
+                "state": "stored",
                 "request": spec.to_dict(),
                 "symbols": symbols,
                 "raw_rows": len(market_data),
@@ -194,7 +222,8 @@ class DataAgent:
                 "aligned_data_path": str(aligned_data_path),
                 "cleaning_stats": clean_result.stats,
                 "calendar_stats": calendar_result.stats,
-                "next_action": "Store data into DuckDB in Day 6.",
+                "storage_stats": storage_result.to_dict(),
+                "next_action": "Add cache mechanism in Day 7.",
             },
             metadata=self._metadata(
                 request,
@@ -208,6 +237,7 @@ class DataAgent:
                 aligned_data_path=aligned_data_path,
                 cleaning_stats=clean_result.stats,
                 calendar_stats=calendar_result.stats,
+                storage_result=storage_result,
             ),
         )
 
@@ -273,6 +303,7 @@ class DataAgent:
         aligned_data_path: Path | None = None,
         cleaning_stats: dict[str, int] | None = None,
         calendar_stats: dict[str, int] | None = None,
+        storage_result: MarketDataStorageResult | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -300,6 +331,8 @@ class DataAgent:
             metadata["cleaning_stats"] = cleaning_stats
         if calendar_stats is not None:
             metadata["calendar_stats"] = calendar_stats
+        if storage_result is not None:
+            metadata["storage_stats"] = storage_result.to_dict()
         return metadata
 
     def _provider_for(self, provider_name: str) -> MarketDataProvider:

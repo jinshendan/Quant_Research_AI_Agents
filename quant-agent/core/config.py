@@ -15,6 +15,7 @@ class AppConfig:
     raw_data_dir: Path
     processed_data_dir: Path
     cache_dir: Path
+    duckdb_path: Path
     factors_dir: Path
     memory_dir: Path
     log_level: str
@@ -45,6 +46,12 @@ class AppConfig:
                 root,
             ),
             cache_dir=_path_from_env(env, "QUANT_AGENT_CACHE_DIR", data_dir / "cache", root),
+            duckdb_path=_path_from_env(
+                env,
+                "QUANT_AGENT_DUCKDB_PATH",
+                data_dir / "processed" / "quant_agent.duckdb",
+                root,
+            ),
             factors_dir=_path_from_env(env, "QUANT_AGENT_FACTORS_DIR", root / "factors", root),
             memory_dir=_path_from_env(env, "QUANT_AGENT_MEMORY_DIR", root / "memory", root),
             log_level=env.get("QUANT_AGENT_LOG_LEVEL", "INFO").upper(),
@@ -59,6 +66,7 @@ class AppConfig:
             self.raw_data_dir,
             self.processed_data_dir,
             self.cache_dir,
+            self.duckdb_path.parent,
             self.factors_dir,
             self.memory_dir,
         )
@@ -96,4 +104,3 @@ def _optional_path_from_env(
     if not path.is_absolute():
         path = root / path
     return path.resolve()
-

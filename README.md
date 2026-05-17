@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-5：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗和交易日历对齐。
+> 当前项目处于早期搭建阶段。已完成 Day 1-6：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐和 DuckDB 持久化。
 
 ## Why This Project
 
@@ -51,11 +51,11 @@ Implemented:
 - row-level cleaning for missing values, duplicates, invalid prices, and no-trade/suspended rows
 - trading-calendar alignment for symbol/date grids
 - aligned data CSV persistence
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, and calendar alignment
+- DuckDB persistence for aligned OHLCV and run metadata
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, and DuckDB storage
 
 Not implemented yet:
 
-- DuckDB persistence
 - factor generation
 - backtesting
 - memory and report generation
@@ -73,6 +73,7 @@ Not implemented yet:
     ├── agents/
     │   ├── __init__.py
     │   ├── data_agent.py
+    │   ├── duckdb_store.py
     │   ├── market_data_provider.py
     │   ├── ohlcv_cleaner.py
     │   └── trading_calendar.py
@@ -164,6 +165,7 @@ OHLCV data through AkShare, normalizes the schema, writes a raw CSV into
 `data/raw/`, cleans row-level quality issues, and writes a processed CSV into
 `data/processed/`. It then aligns processed data to the exchange trading
 calendar and writes an `aligned_*.csv` file into `data/processed/`.
+Finally, it persists aligned rows and run metadata into DuckDB.
 
 ```python
 from agents.data_agent import DataAgent
@@ -235,6 +237,19 @@ is_expected_trading_day, is_suspended_or_missing
 Missing symbol/date rows are retained with null OHLCV fields and
 `is_suspended_or_missing = True`. The system does not forward-fill prices.
 
+Current DuckDB tables:
+
+```text
+market_ohlcv_aligned
+market_data_runs
+```
+
+Default database path:
+
+```text
+quant-agent/data/processed/quant_agent.duckdb
+```
+
 ## Configuration
 
 `AppConfig` reads optional environment variables:
@@ -246,6 +261,7 @@ Missing symbol/date rows are retained with null OHLCV fields and
 | `QUANT_AGENT_RAW_DATA_DIR` | Raw data directory override |
 | `QUANT_AGENT_PROCESSED_DATA_DIR` | Processed data directory override |
 | `QUANT_AGENT_CACHE_DIR` | Cache directory override |
+| `QUANT_AGENT_DUCKDB_PATH` | DuckDB database path override |
 | `QUANT_AGENT_FACTORS_DIR` | Factors directory override |
 | `QUANT_AGENT_MEMORY_DIR` | Memory directory override |
 | `QUANT_AGENT_LOG_LEVEL` | Logging level, default `INFO` |
