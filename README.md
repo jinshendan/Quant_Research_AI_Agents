@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-8：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存和 HypothesisAgent。
+> 当前项目处于早期搭建阶段。已完成 Day 1-9：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent 和因子模板库。
 
 ## Why This Project
 
@@ -54,11 +54,12 @@ Implemented:
 - DuckDB persistence for aligned OHLCV and run metadata
 - file-backed market data cache with cache-hit and force-refresh behavior
 - `HypothesisAgent` for structured alpha hypothesis generation
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, and HypothesisAgent behavior
+- symbolic factor template library for Day 10 feature computation
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, and factor templates
 
 Not implemented yet:
 
-- factor templates and feature generation
+- feature generation
 - backtesting
 - memory and report generation
 - Streamlit dashboard
@@ -76,6 +77,7 @@ Not implemented yet:
     │   ├── __init__.py
     │   ├── data_agent.py
     │   ├── duckdb_store.py
+    │   ├── factor_templates.py
     │   ├── hypothesis_agent.py
     │   ├── market_data_cache.py
     │   ├── market_data_provider.py
@@ -328,6 +330,35 @@ Each hypothesis includes:
 This output is intentionally shaped for Day 9 factor templates and Day 10
 feature generation.
 
+## Factor Template Library Example
+
+The Day 9 template library maps HypothesisAgent candidate signals to symbolic
+factor definitions. Templates define the formula, required columns, lookback
+window, expected direction, and risk flags. They do not compute factor values
+yet; Day 10 FeatureAgent will execute them against aligned OHLCV data.
+
+```python
+from agents.factor_templates import FactorTemplateLibrary
+from agents.hypothesis_agent import HypothesisAgent, HypothesisSpec
+
+hypotheses = HypothesisAgent().generate_hypotheses(
+    HypothesisSpec.from_payload(
+        {
+            "universe": "CSI500",
+            "horizon": "short",
+            "max_hypotheses": 1,
+        }
+    )
+)
+
+library = FactorTemplateLibrary()
+template_map = library.templates_for_hypotheses(hypotheses)
+print(template_map[0]["templates"])
+```
+
+Default templates currently cover liquidity, momentum, reversal, volatility,
+breakout, price-action, and risk-adjusted momentum signals.
+
 ## Configuration
 
 `AppConfig` reads optional environment variables:
@@ -359,9 +390,10 @@ Week 1:
 - Day 6: DuckDB storage
 - Day 7: file-backed market data cache
 - Day 8: structured HypothesisAgent
+- Day 9: symbolic factor templates
 
-Next steps cover factor templates, feature generation, backtesting, evaluation,
-memory, reporting, and dashboard.
+Next steps cover feature generation, backtesting, evaluation, memory, reporting,
+and dashboard.
 
 ## Engineering Principles
 

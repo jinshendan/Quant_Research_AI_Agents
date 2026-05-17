@@ -1,3 +1,14 @@
 name: generate_factor
 description: Generate candidate factor definitions from research hypotheses.
-
+inputs:
+  - hypothesis_id
+  - candidate_signals
+  - factor_template_ids
+outputs:
+  - symbolic_factor_templates
+  - required_columns
+  - lookback_days
+  - risk_flags
+notes:
+  - Day 9 defines symbolic templates only.
+  - Day 10 FeatureAgent will compute factor values from aligned OHLCV data.

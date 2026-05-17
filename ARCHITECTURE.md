@@ -371,6 +371,55 @@ generator gives the system a stable agent contract first; a later LLM-backed
 generator can be added behind the same `HypothesisTemplate`/agent output shape
 once evaluation and memory loops exist.
 
+## Day 9 --- Factor Templates
+
+Implemented in `quant-agent/`:
+
+-   symbolic factor template library in
+    `quant-agent/agents/factor_templates.py`
+-   validated `FactorTemplate` schema for formula, direction, required columns,
+    parameters, lookback window, signal tags, and risk flags
+-   `FactorTemplateLibrary` registry for template lookup and manifest export
+-   mapping from HypothesisAgent `candidate_signals` to matching factor
+    templates
+-   future-looking expression guardrails for obvious `future_`, `lead(...)`,
+    and negative-shift tokens
+-   factor-generation prompt guidance in
+    `quant-agent/prompts/factor_generation.md`
+-   updated `generate_factor` skill metadata
+-   tests for default template validity, serialization, signal matching,
+    hypothesis mapping, manifest export, duplicate ids, and invalid expressions
+
+Current template shape:
+
+```text
+template_id
+name
+category
+description
+expression
+direction
+required_columns
+parameters
+lookback_days
+signal_tags
+risk_flags
+```
+
+Default template categories:
+
+-   liquidity
+-   momentum
+-   reversal
+-   volatility
+-   breakout
+-   price_action
+-   risk_adjusted_momentum
+
+Day 9 intentionally defines symbolic formulas only. It does not compute factor
+values, save factor matrices, or evaluate performance. FeatureAgent on Day 10
+will execute these templates against aligned OHLCV data.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

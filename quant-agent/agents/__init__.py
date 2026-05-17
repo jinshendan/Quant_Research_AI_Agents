@@ -6,6 +6,10 @@ from agents.duckdb_store import (
     MarketDataStorageContext,
     MarketDataStorageResult,
 )
+from agents.factor_templates import (
+    FactorTemplate,
+    FactorTemplateLibrary,
+)
 from agents.hypothesis_agent import (
     HypothesisAgent,
     HypothesisSpec,
@@ -32,6 +36,8 @@ __all__ = [
     "CalendarAlignmentResult",
     "DataAgent",
     "DuckDBMarketDataStore",
+    "FactorTemplate",
+    "FactorTemplateLibrary",
     "HypothesisAgent",
     "HypothesisSpec",
     "HypothesisTemplate",
