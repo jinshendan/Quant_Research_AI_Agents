@@ -19,6 +19,7 @@ from agents.market_data_provider import (
     MarketDataProvider,
     combine_ohlcv_frames,
 )
+from agents.ohlcv_cleaner import clean_ohlcv
 
 SUPPORTED_FREQUENCIES = {"daily"}
 SUPPORTED_PROVIDERS = {"akshare"}
@@ -133,11 +134,13 @@ class DataAgent:
         try:
             market_data = self.download_ohlcv(spec, symbols=symbols, provider=provider)
             raw_data_path = self.save_raw_ohlcv(market_data, spec)
+            clean_result = clean_ohlcv(market_data)
+            processed_data_path = self.save_processed_ohlcv(clean_result.data, spec)
         except Exception as exc:
             elapsed = perf_counter() - started_at
             self.logger.exception(
-                "Market data download failed.",
-                extra={"action": "download_ohlcv", "status": "error"},
+                "Market data download or cleaning failed.",
+                extra={"action": "prepare_ohlcv", "status": "error"},
             )
             return AgentResponse.failure(
                 str(exc),
@@ -152,18 +155,21 @@ class DataAgent:
 
         elapsed = perf_counter() - started_at
         self.logger.info(
-            "Downloaded and stored raw OHLCV data.",
-            extra={"action": "download_ohlcv", "status": "success"},
+            "Downloaded, cleaned, and stored OHLCV data.",
+            extra={"action": "prepare_ohlcv", "status": "success"},
         )
         return AgentResponse.success(
             output={
-                "state": "downloaded",
+                "state": "processed",
                 "request": spec.to_dict(),
                 "symbols": symbols,
-                "rows": len(market_data),
-                "columns": list(market_data.columns),
+                "raw_rows": len(market_data),
+                "processed_rows": len(clean_result.data),
+                "columns": list(clean_result.data.columns),
                 "raw_data_path": str(raw_data_path),
-                "next_action": "Clean missing values and handle suspended stocks in Day 4.",
+                "processed_data_path": str(processed_data_path),
+                "cleaning_stats": clean_result.stats,
+                "next_action": "Align trading calendar in Day 5.",
             },
             metadata=self._metadata(
                 request,
@@ -171,8 +177,10 @@ class DataAgent:
                 provider=spec.provider,
                 frequency=spec.frequency,
                 symbols_count=len(symbols),
-                rows=len(market_data),
+                rows=len(clean_result.data),
                 raw_data_path=raw_data_path,
+                processed_data_path=processed_data_path,
+                cleaning_stats=clean_result.stats,
             ),
         )
 
@@ -212,6 +220,12 @@ class DataAgent:
         market_data.to_csv(output_path, index=False, date_format="%Y-%m-%d")
         return output_path
 
+    def save_processed_ohlcv(self, clean_data: pd.DataFrame, spec: MarketDataSpec) -> Path:
+        output_path = self._processed_ohlcv_path(spec)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        clean_data.to_csv(output_path, index=False, date_format="%Y-%m-%d")
+        return output_path
+
     def _metadata(
         self,
         request: AgentRequest,
@@ -222,6 +236,8 @@ class DataAgent:
         symbols_count: int | None = None,
         rows: int | None = None,
         raw_data_path: Path | None = None,
+        processed_data_path: Path | None = None,
+        cleaning_stats: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -241,6 +257,10 @@ class DataAgent:
             metadata["rows"] = rows
         if raw_data_path is not None:
             metadata["raw_data_path"] = str(raw_data_path)
+        if processed_data_path is not None:
+            metadata["processed_data_path"] = str(processed_data_path)
+        if cleaning_stats is not None:
+            metadata["cleaning_stats"] = cleaning_stats
         return metadata
 
     def _provider_for(self, provider_name: str) -> MarketDataProvider:
@@ -251,13 +271,18 @@ class DataAgent:
         return provider
 
     def _raw_ohlcv_path(self, spec: MarketDataSpec) -> Path:
+        return self.config.raw_data_dir / self._ohlcv_filename(spec)
+
+    def _processed_ohlcv_path(self, spec: MarketDataSpec) -> Path:
+        return self.config.processed_data_dir / self._ohlcv_filename(spec)
+
+    def _ohlcv_filename(self, spec: MarketDataSpec) -> str:
         safe_universe = _safe_filename(spec.universe)
         adjustment = spec.adjust or "none"
-        filename = (
+        return (
             f"ohlcv_{spec.provider}_{safe_universe}_{spec.frequency}_"
             f"{adjustment}_{spec.start_date:%Y%m%d}_{spec.end_date:%Y%m%d}.csv"
         )
-        return self.config.raw_data_dir / filename
 
 
 def _required_str(payload: Mapping[str, Any], key: str) -> str:

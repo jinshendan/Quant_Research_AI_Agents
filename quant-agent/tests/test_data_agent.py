@@ -120,19 +120,26 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     response = agent.run(request)
 
     assert response.status == "success"
-    assert response.output["state"] == "downloaded"
-    assert response.output["rows"] == 2
+    assert response.output["state"] == "processed"
+    assert response.output["raw_rows"] == 2
+    assert response.output["processed_rows"] == 2
     assert response.output["symbols"] == ["000001", "000002"]
     assert response.output["request"]["provider"] == "akshare"
     assert Path(response.output["raw_data_path"]).is_file()
+    assert Path(response.output["processed_data_path"]).is_file()
+    assert response.output["cleaning_stats"]["suspended_rows"] == 0
     assert response.metadata["agent"] == "DataAgent"
     assert response.metadata["task_id"] == "data-task-1"
     assert response.metadata["rows"] == 2
+    assert response.metadata["cleaning_stats"]["output_rows"] == 2
     assert (tmp_path / "data" / "raw").is_dir()
-    assert "DataAgent | download_ohlcv | success" in stream.getvalue()
+    assert (tmp_path / "data" / "processed").is_dir()
+    assert "DataAgent | prepare_ohlcv | success" in stream.getvalue()
 
     stored = pd.read_csv(response.output["raw_data_path"])
     assert list(stored["symbol"].astype(str).str.zfill(6)) == ["000001", "000002"]
+    processed = pd.read_csv(response.output["processed_data_path"])
+    assert list(processed["symbol"].astype(str).str.zfill(6)) == ["000001", "000002"]
 
 
 def test_data_agent_run_returns_error_for_bad_payload(tmp_path: Path) -> None:

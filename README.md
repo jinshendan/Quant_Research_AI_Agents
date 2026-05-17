@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-3：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架和 AkShare OHLCV 下载。
+> 当前项目处于早期搭建阶段。已完成 Day 1-4：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载和基础清洗。
 
 ## Why This Project
 
@@ -47,12 +47,12 @@ Implemented:
 - AkShare provider integration
 - OHLCV schema normalization
 - raw data CSV persistence
-- unit tests for logging, config, protocol models, DataAgent, and market data provider behavior
+- processed data CSV persistence
+- row-level cleaning for missing values, duplicates, invalid prices, and no-trade/suspended rows
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, and OHLCV cleaning
 
 Not implemented yet:
 
-- missing-value cleaning
-- suspended-stock handling
 - trading-calendar alignment
 - DuckDB persistence
 - factor generation
@@ -72,7 +72,8 @@ Not implemented yet:
     ├── agents/
     │   ├── __init__.py
     │   ├── data_agent.py
-    │   └── market_data_provider.py
+    │   ├── market_data_provider.py
+    │   └── ohlcv_cleaner.py
     ├── core/
     │   ├── __init__.py
     │   ├── config.py
@@ -157,8 +158,9 @@ python -m mypy core agents tests app.py
 ## DataAgent Example
 
 The current `DataAgent` validates a market data request, downloads raw A-share
-OHLCV data through AkShare, normalizes the schema, and writes a CSV into
-`data/raw/`.
+OHLCV data through AkShare, normalizes the schema, writes a raw CSV into
+`data/raw/`, cleans row-level quality issues, and writes a processed CSV into
+`data/processed/`.
 
 ```python
 from agents.data_agent import DataAgent
@@ -211,6 +213,18 @@ Current raw OHLCV columns:
 date, symbol, open, high, low, close, volume, amount,
 amplitude, pct_change, price_change, turnover_rate
 ```
+
+Current cleaning rules:
+
+- drop rows with invalid date or symbol
+- drop duplicate `symbol` + `date` rows, keeping the last provider row
+- drop rows missing essential OHLCV fields
+- drop rows with invalid OHLC price relationships
+- drop no-trade rows where `volume <= 0` or `amount <= 0`
+- fill optional numeric fields with `0.0` after invalid rows are removed
+
+Trading-calendar alignment is still pending, so suspended days that are absent
+from the provider output are handled in Day 5.
 
 ## Configuration
 

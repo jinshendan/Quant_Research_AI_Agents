@@ -161,6 +161,41 @@ the data handoff explicit until DuckDB persistence is added on Day 6.
 Cleaning missing values, suspended-stock handling, and trading-calendar
 alignment are intentionally deferred to Day 4 and Day 5.
 
+## Day 4 --- OHLCV Cleaning + Suspended Row Handling
+
+Implemented in `quant-agent/`:
+
+-   row-level OHLCV cleaning in `quant-agent/agents/ohlcv_cleaner.py`
+-   processed OHLCV CSV persistence into `data/processed/`
+-   DataAgent output fields for both raw and processed data paths
+-   cleaning statistics in AgentResponse output and metadata
+-   tests for missing values, duplicate rows, invalid price rows, and no-trade
+    suspended rows
+
+Current cleaning rules:
+
+-   require the Day 3 OHLCV schema
+-   coerce `date`, `symbol`, and numeric columns into stable types
+-   drop rows with invalid date or symbol
+-   drop duplicate `symbol` + `date` rows, keeping the last provider row
+-   drop rows missing essential `open`, `high`, `low`, `close`, `volume`, or
+    `amount`
+-   drop rows with invalid OHLC price relationships or non-positive prices
+-   drop no-trade rows where `volume <= 0` or `amount <= 0`, treating them as
+    suspended or effectively suspended sessions
+-   fill optional numeric fields `amplitude`, `pct_change`, `price_change`,
+    and `turnover_rate` with `0.0` after invalid rows are removed
+
+DataAgent now returns:
+
+```text
+raw_data_path, processed_data_path, raw_rows, processed_rows, cleaning_stats
+```
+
+Trading-calendar alignment remains intentionally deferred to Day 5. Suspended
+days that are absent from the provider output cannot be inferred until the
+calendar alignment step introduces the expected trading date grid.
+
 ------------------------------------------------------------------------
 
 # Memory Schema
