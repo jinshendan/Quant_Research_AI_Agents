@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-6：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐和 DuckDB 持久化。
+> 当前项目处于早期搭建阶段。已完成 Day 1-7：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化和市场数据缓存。
 
 ## Why This Project
 
@@ -52,7 +52,8 @@ Implemented:
 - trading-calendar alignment for symbol/date grids
 - aligned data CSV persistence
 - DuckDB persistence for aligned OHLCV and run metadata
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, and DuckDB storage
+- file-backed market data cache with cache-hit and force-refresh behavior
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, and market data cache behavior
 
 Not implemented yet:
 
@@ -74,6 +75,7 @@ Not implemented yet:
     │   ├── __init__.py
     │   ├── data_agent.py
     │   ├── duckdb_store.py
+    │   ├── market_data_cache.py
     │   ├── market_data_provider.py
     │   ├── ohlcv_cleaner.py
     │   └── trading_calendar.py
@@ -165,7 +167,8 @@ OHLCV data through AkShare, normalizes the schema, writes a raw CSV into
 `data/raw/`, cleans row-level quality issues, and writes a processed CSV into
 `data/processed/`. It then aligns processed data to the exchange trading
 calendar and writes an `aligned_*.csv` file into `data/processed/`.
-Finally, it persists aligned rows and run metadata into DuckDB.
+Finally, it persists aligned rows and run metadata into DuckDB and caches the
+successful output manifest under `data/cache/market_data/`.
 
 ```python
 from agents.data_agent import DataAgent
@@ -184,6 +187,31 @@ request = AgentRequest.create(
 response = DataAgent().run(request)
 print(response.to_dict())
 ```
+
+Cache reads are enabled by default. A repeated request with the same provider,
+universe, frequency, adjustment, date range, and explicit symbol list returns
+the cached result without calling the data provider again:
+
+```python
+cached_response = DataAgent().run(request)
+print(cached_response.output["state"])  # cached
+```
+
+Force a refresh when you want to re-query the provider and replace the cache:
+
+```python
+refresh_request = AgentRequest.create(
+    {
+        "universe": "CSI500",
+        "start_date": "2020-01-01",
+        "end_date": "2025-12-31",
+        "force_refresh": True,
+    }
+)
+```
+
+Set `"use_cache": False` when a run should neither read nor write cache
+manifests.
 
 For direct stock downloads, `universe` can be a six-digit A-share code:
 
@@ -237,6 +265,16 @@ is_expected_trading_day, is_suspended_or_missing
 Missing symbol/date rows are retained with null OHLCV fields and
 `is_suspended_or_missing = True`. The system does not forward-fill prices.
 
+Cache manifests are stored in:
+
+```text
+quant-agent/data/cache/market_data/
+```
+
+Each cache hit validates that the raw CSV, processed CSV, aligned CSV, and
+DuckDB database path still exist. Missing artifacts make the entry stale and
+trigger a fresh run.
+
 Current DuckDB tables:
 
 ```text
@@ -279,7 +317,7 @@ Week 1:
 - Day 4: missing-value cleaning and suspended-stock handling
 - Day 5: trading-calendar alignment
 - Day 6: DuckDB storage
-- Day 7: cache mechanism
+- Day 7: file-backed market data cache
 
 Later weeks cover factor generation, backtesting, evaluation, memory, reporting, and dashboard.
 

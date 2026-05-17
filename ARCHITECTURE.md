@@ -269,9 +269,54 @@ raw_rows, processed_rows, aligned_rows, rows_written,
 cleaning_stats_json, calendar_stats_json, created_at
 ```
 
-Cache semantics are intentionally deferred to Day 7. Day 6 only persists the
-latest prepared result for the requested symbol/date range and records run
-metadata.
+Day 6 only persists the latest prepared result for the requested symbol/date
+range and records run metadata. Cache semantics are implemented on Day 7.
+
+## Day 7 --- Market Data Cache
+
+Implemented in `quant-agent/`:
+
+-   file-backed market-data cache in `quant-agent/agents/market_data_cache.py`
+-   deterministic cache keys from provider, universe, frequency, adjustment,
+    date range, explicit symbols, and cache schema version
+-   cache manifests under `data/cache/market_data/`
+-   DataAgent cache lookup before provider symbol resolution, downloads,
+    cleaning, calendar alignment, or DuckDB writes
+-   cache artifact validation for raw CSV, processed CSV, aligned CSV, and the
+    DuckDB database path
+-   `payload.force_refresh` and `payload.refresh_cache` support to bypass an
+    existing cache entry and refresh it
+-   `payload.use_cache = false` support to run without reading or writing the
+    cache
+-   tests for cache writes, cache hits, stale artifact detection, deterministic
+    cache identity, and DataAgent force-refresh behavior
+
+Current cache manifest shape:
+
+```text
+cache_schema_version
+created_at
+identity
+output
+```
+
+Cache hits return the cached DataAgent output with:
+
+```text
+state = cached
+cache_stats.status = hit
+```
+
+Fresh successful runs keep:
+
+```text
+state = stored
+cache_stats.status = refreshed
+```
+
+Stale manifests are treated as cache misses instead of hard failures. The
+cache currently has no time-to-live policy; callers can refresh explicitly with
+`force_refresh` when they need to re-query the data provider.
 
 ------------------------------------------------------------------------
 

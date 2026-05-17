@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -18,6 +19,11 @@ from agents.duckdb_store import (
     DuckDBMarketDataStore,
     MarketDataStorageContext,
     MarketDataStorageResult,
+)
+from agents.market_data_cache import (
+    MarketDataCache,
+    MarketDataCacheIdentity,
+    MarketDataCacheLookup,
 )
 from agents.market_data_provider import (
     AkShareMarketDataProvider,
@@ -49,6 +55,8 @@ class MarketDataSpec:
     provider: str = "akshare"
     symbols: tuple[str, ...] = ()
     adjust: str = ""
+    use_cache: bool = True
+    force_refresh: bool = False
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> MarketDataSpec:
@@ -59,6 +67,8 @@ class MarketDataSpec:
         provider = _optional_str(payload, "provider", "akshare")
         symbols = _optional_symbols(payload)
         adjust = _optional_adjust(payload)
+        use_cache = _optional_bool(payload, "use_cache", True)
+        force_refresh = _optional_bool_alias(payload, ("force_refresh", "refresh_cache"), False)
 
         if end_date < start_date:
             msg = "end_date must be greater than or equal to start_date."
@@ -81,6 +91,8 @@ class MarketDataSpec:
             provider=provider,
             symbols=symbols,
             adjust=adjust,
+            use_cache=use_cache,
+            force_refresh=force_refresh,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -92,6 +104,8 @@ class MarketDataSpec:
             "provider": self.provider,
             "symbols": list(self.symbols),
             "adjust": self.adjust,
+            "use_cache": self.use_cache,
+            "force_refresh": self.force_refresh,
         }
 
 
@@ -108,6 +122,7 @@ class DataAgent:
         providers: Mapping[str, MarketDataProvider] | None = None,
         calendar_providers: Mapping[str, TradingCalendarProvider] | None = None,
         market_data_store: DuckDBMarketDataStore | None = None,
+        market_data_cache: MarketDataCache | None = None,
     ) -> None:
         self.config = config or AppConfig.from_env()
         self.logger = logger or get_agent_logger(self.name)
@@ -120,6 +135,7 @@ class DataAgent:
             else {"akshare": AkShareTradingCalendarProvider()}
         )
         self.market_data_store = market_data_store or DuckDBMarketDataStore(self.config.duckdb_path)
+        self.market_data_cache = market_data_cache or MarketDataCache(self.config.cache_dir)
 
     def run(self, request: AgentRequest) -> AgentResponse:
         started_at = perf_counter()
@@ -131,6 +147,34 @@ class DataAgent:
         try:
             spec = MarketDataSpec.from_payload(request.payload)
             self.config.ensure_directories()
+            cache_identity = self._cache_identity(spec)
+            cache_lookup = self._lookup_cache(spec, cache_identity)
+            if cache_lookup is not None and cache_lookup.hit:
+                elapsed = perf_counter() - started_at
+                self.logger.info(
+                    "Market data cache hit.",
+                    extra={"action": "cache_lookup", "status": "hit"},
+                )
+                output = self._cached_output(cache_lookup)
+                return AgentResponse.success(
+                    output=output,
+                    metadata=self._metadata(
+                        request,
+                        elapsed,
+                        provider=spec.provider,
+                        frequency=spec.frequency,
+                        symbols_count=len(output.get("symbols", [])),
+                        rows=output.get("aligned_rows"),
+                        raw_data_path=_optional_path(output.get("raw_data_path")),
+                        processed_data_path=_optional_path(output.get("processed_data_path")),
+                        aligned_data_path=_optional_path(output.get("aligned_data_path")),
+                        cleaning_stats=output.get("cleaning_stats"),
+                        calendar_stats=output.get("calendar_stats"),
+                        storage_stats=output.get("storage_stats"),
+                        cache_stats=output.get("cache_stats"),
+                    ),
+                )
+
             provider = self._provider_for(spec.provider)
             calendar_provider = self._calendar_provider_for(spec.provider)
             symbols = list(spec.symbols) or provider.resolve_symbols(spec.universe)
@@ -186,6 +230,7 @@ class DataAgent:
                     calendar_stats=calendar_result.stats,
                 ),
             )
+            cache_stats = self.market_data_cache.disabled_stats(cache_identity)
         except Exception as exc:
             elapsed = perf_counter() - started_at
             self.logger.exception(
@@ -208,23 +253,58 @@ class DataAgent:
             "Downloaded, cleaned, aligned, and persisted OHLCV data.",
             extra={"action": "prepare_ohlcv", "status": "success"},
         )
+        output = {
+            "state": "stored",
+            "request": spec.to_dict(),
+            "symbols": symbols,
+            "raw_rows": len(market_data),
+            "processed_rows": len(clean_result.data),
+            "aligned_rows": len(calendar_result.data),
+            "columns": list(calendar_result.data.columns),
+            "raw_data_path": str(raw_data_path),
+            "processed_data_path": str(processed_data_path),
+            "aligned_data_path": str(aligned_data_path),
+            "cleaning_stats": clean_result.stats,
+            "calendar_stats": calendar_result.stats,
+            "storage_stats": storage_result.to_dict(),
+            "next_action": "Build HypothesisAgent in Day 8.",
+        }
+        if spec.use_cache:
+            try:
+                cache_entry = self.market_data_cache.store(cache_identity, output)
+                output = cache_entry.output
+            except Exception as exc:
+                elapsed = perf_counter() - started_at
+                self.logger.exception(
+                    "Market data cache write failed.",
+                    extra={"action": "cache_write", "status": "error"},
+                )
+                return AgentResponse.failure(
+                    str(exc),
+                    metadata=self._metadata(
+                        request,
+                        elapsed,
+                        provider=spec.provider,
+                        frequency=spec.frequency,
+                        symbols_count=len(symbols),
+                        rows=len(calendar_result.data),
+                        raw_data_path=raw_data_path,
+                        processed_data_path=processed_data_path,
+                        aligned_data_path=aligned_data_path,
+                        cleaning_stats=clean_result.stats,
+                        calendar_stats=calendar_result.stats,
+                        storage_result=storage_result,
+                    ),
+                )
+            self.logger.info(
+                "Market data cache refreshed.",
+                extra={"action": "cache_write", "status": "success"},
+            )
+        else:
+            output["cache_stats"] = cache_stats
+
         return AgentResponse.success(
-            output={
-                "state": "stored",
-                "request": spec.to_dict(),
-                "symbols": symbols,
-                "raw_rows": len(market_data),
-                "processed_rows": len(clean_result.data),
-                "aligned_rows": len(calendar_result.data),
-                "columns": list(calendar_result.data.columns),
-                "raw_data_path": str(raw_data_path),
-                "processed_data_path": str(processed_data_path),
-                "aligned_data_path": str(aligned_data_path),
-                "cleaning_stats": clean_result.stats,
-                "calendar_stats": calendar_result.stats,
-                "storage_stats": storage_result.to_dict(),
-                "next_action": "Add cache mechanism in Day 7.",
-            },
+            output=output,
             metadata=self._metadata(
                 request,
                 elapsed,
@@ -238,6 +318,7 @@ class DataAgent:
                 cleaning_stats=clean_result.stats,
                 calendar_stats=calendar_result.stats,
                 storage_result=storage_result,
+                cache_stats=output.get("cache_stats"),
             ),
         )
 
@@ -289,6 +370,54 @@ class DataAgent:
         aligned_data.to_csv(output_path, index=False, date_format="%Y-%m-%d")
         return output_path
 
+    def _lookup_cache(
+        self,
+        spec: MarketDataSpec,
+        identity: MarketDataCacheIdentity,
+    ) -> MarketDataCacheLookup | None:
+        if not spec.use_cache:
+            self.logger.info(
+                "Market data cache disabled.",
+                extra={"action": "cache_lookup", "status": "disabled"},
+            )
+            return None
+        if spec.force_refresh:
+            self.logger.info(
+                "Market data cache bypassed by force_refresh.",
+                extra={"action": "cache_lookup", "status": "bypassed"},
+            )
+            return None
+
+        lookup = self.market_data_cache.lookup(identity)
+        if not lookup.hit:
+            self.logger.info(
+                f"Market data cache {lookup.status}: {lookup.reason}.",
+                extra={"action": "cache_lookup", "status": lookup.status},
+            )
+        return lookup
+
+    def _cache_identity(self, spec: MarketDataSpec) -> MarketDataCacheIdentity:
+        return MarketDataCacheIdentity(
+            universe=spec.universe,
+            provider=spec.provider,
+            frequency=spec.frequency,
+            adjust=spec.adjust,
+            start_date=spec.start_date.isoformat(),
+            end_date=spec.end_date.isoformat(),
+            symbols=spec.symbols,
+        )
+
+    def _cached_output(self, lookup: MarketDataCacheLookup) -> dict[str, Any]:
+        if lookup.entry is None:
+            msg = "Cannot build cached output from a cache miss."
+            raise RuntimeError(msg)
+
+        output = copy.deepcopy(lookup.entry.output)
+        output["state"] = "cached"
+        output["cache_stats"] = lookup.stats()
+        output["next_action"] = "Build HypothesisAgent in Day 8."
+        return output
+
     def _metadata(
         self,
         request: AgentRequest,
@@ -304,6 +433,8 @@ class DataAgent:
         cleaning_stats: dict[str, int] | None = None,
         calendar_stats: dict[str, int] | None = None,
         storage_result: MarketDataStorageResult | None = None,
+        storage_stats: Mapping[str, Any] | None = None,
+        cache_stats: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -333,6 +464,10 @@ class DataAgent:
             metadata["calendar_stats"] = calendar_stats
         if storage_result is not None:
             metadata["storage_stats"] = storage_result.to_dict()
+        if storage_stats is not None:
+            metadata["storage_stats"] = dict(storage_stats)
+        if cache_stats is not None:
+            metadata["cache_stats"] = dict(cache_stats)
         return metadata
 
     def _provider_for(self, provider_name: str) -> MarketDataProvider:
@@ -383,6 +518,25 @@ def _optional_str(payload: Mapping[str, Any], key: str, default: str) -> str:
     return value.strip().lower()
 
 
+def _optional_bool(payload: Mapping[str, Any], key: str, default: bool) -> bool:
+    value = payload.get(key, default)
+    if not isinstance(value, bool):
+        msg = f"payload.{key} must be a boolean."
+        raise ValueError(msg)
+    return value
+
+
+def _optional_bool_alias(
+    payload: Mapping[str, Any],
+    keys: Sequence[str],
+    default: bool,
+) -> bool:
+    for key in keys:
+        if key in payload:
+            return _optional_bool(payload, key, default)
+    return default
+
+
 def _optional_adjust(payload: Mapping[str, Any]) -> str:
     value = payload.get("adjust", "")
     if not isinstance(value, str):
@@ -430,3 +584,9 @@ def _parse_date(value: Any, key: str) -> date:
 def _safe_filename(value: str) -> str:
     cleaned = _SAFE_FILENAME_PATTERN.sub("_", value.strip())
     return cleaned.strip("._") or "universe"
+
+
+def _optional_path(value: Any) -> Path | None:
+    if isinstance(value, str) and value:
+        return Path(value)
+    return None

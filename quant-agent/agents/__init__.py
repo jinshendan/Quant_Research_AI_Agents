@@ -1,7 +1,17 @@
 """Agent implementations are added incrementally according to TASKS.md."""
 
 from agents.data_agent import DataAgent, MarketDataSpec
-from agents.duckdb_store import DuckDBMarketDataStore, MarketDataStorageContext, MarketDataStorageResult
+from agents.duckdb_store import (
+    DuckDBMarketDataStore,
+    MarketDataStorageContext,
+    MarketDataStorageResult,
+)
+from agents.market_data_cache import (
+    MarketDataCache,
+    MarketDataCacheEntry,
+    MarketDataCacheIdentity,
+    MarketDataCacheLookup,
+)
 from agents.market_data_provider import AkShareMarketDataProvider, MarketDataProvider
 from agents.ohlcv_cleaner import OhlcvCleanResult, clean_ohlcv
 from agents.trading_calendar import (
@@ -17,6 +27,10 @@ __all__ = [
     "CalendarAlignmentResult",
     "DataAgent",
     "DuckDBMarketDataStore",
+    "MarketDataCache",
+    "MarketDataCacheEntry",
+    "MarketDataCacheIdentity",
+    "MarketDataCacheLookup",
     "MarketDataProvider",
     "MarketDataStorageContext",
     "MarketDataStorageResult",

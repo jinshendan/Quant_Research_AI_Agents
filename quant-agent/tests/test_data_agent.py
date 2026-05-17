@@ -21,7 +21,12 @@ def _config(tmp_path: Path) -> AppConfig:
 class FakeMarketDataProvider:
     name = "akshare"
 
+    def __init__(self) -> None:
+        self.resolve_calls = 0
+        self.download_calls = 0
+
     def resolve_symbols(self, universe: str) -> list[str]:
+        self.resolve_calls += 1
         if universe == "CSI500":
             return ["000001", "000002"]
         return [universe]
@@ -35,6 +40,7 @@ class FakeMarketDataProvider:
         frequency: str,
         adjust: str,
     ) -> pd.DataFrame:
+        self.download_calls += 1
         return pd.DataFrame(
             [
                 {
@@ -58,7 +64,11 @@ class FakeMarketDataProvider:
 class FakeTradingCalendarProvider:
     name = "akshare"
 
+    def __init__(self) -> None:
+        self.calls = 0
+
     def get_trading_days(self, *, start_date: date, end_date: date) -> list[date]:
+        self.calls += 1
         return [
             pd.Timestamp(start_date).date(),
             pd.Timestamp("2020-01-02").date(),
@@ -87,6 +97,8 @@ def test_market_data_spec_normalizes_valid_payload() -> None:
         "provider": "akshare",
         "symbols": ["000001", "000002"],
         "adjust": "qfq",
+        "use_cache": True,
+        "force_refresh": False,
     }
 
 
@@ -146,6 +158,7 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     assert response.output["cleaning_stats"]["suspended_rows"] == 0
     assert response.output["calendar_stats"]["missing_or_suspended_rows"] == 4
     assert response.output["storage_stats"]["rows_written"] == 6
+    assert response.output["cache_stats"]["status"] == "refreshed"
     assert Path(response.output["storage_stats"]["database_path"]).is_file()
     assert response.metadata["agent"] == "DataAgent"
     assert response.metadata["task_id"] == "data-task-1"
@@ -153,6 +166,7 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     assert response.metadata["cleaning_stats"]["output_rows"] == 2
     assert response.metadata["calendar_stats"]["output_rows"] == 6
     assert response.metadata["storage_stats"]["rows_written"] == 6
+    assert response.metadata["cache_stats"]["status"] == "refreshed"
     assert (tmp_path / "data" / "raw").is_dir()
     assert (tmp_path / "data" / "processed").is_dir()
     assert "DataAgent | prepare_ohlcv | success" in stream.getvalue()
@@ -170,6 +184,79 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
         run_rows = connection.execute("SELECT count(*) FROM market_data_runs").fetchone()
     assert stored_rows == (6,)
     assert run_rows == (1,)
+
+
+def test_data_agent_run_returns_cached_result_without_provider_calls(tmp_path: Path) -> None:
+    request_payload = {
+        "universe": "CSI500",
+        "start_date": "2020-01-01",
+        "end_date": "2025-12-31",
+    }
+    first_provider = FakeMarketDataProvider()
+    first_calendar = FakeTradingCalendarProvider()
+    first_agent = DataAgent(
+        config=_config(tmp_path),
+        providers={"akshare": first_provider},
+        calendar_providers={"akshare": first_calendar},
+    )
+
+    first_response = first_agent.run(AgentRequest.create(request_payload, task_id="data-task-1"))
+
+    assert first_response.status == "success"
+    assert first_response.output["cache_stats"]["status"] == "refreshed"
+    assert first_provider.resolve_calls == 1
+    assert first_provider.download_calls == 2
+    assert first_calendar.calls == 1
+
+    second_provider = ExplodingMarketDataProvider()
+    second_calendar = ExplodingTradingCalendarProvider()
+    second_agent = DataAgent(
+        config=_config(tmp_path),
+        providers={"akshare": second_provider},
+        calendar_providers={"akshare": second_calendar},
+    )
+
+    second_response = second_agent.run(AgentRequest.create(request_payload, task_id="data-task-2"))
+
+    assert second_response.status == "success"
+    assert second_response.output["state"] == "cached"
+    assert second_response.output["raw_rows"] == 2
+    assert second_response.output["aligned_rows"] == 6
+    assert second_response.output["cache_stats"]["status"] == "hit"
+    assert second_response.metadata["task_id"] == "data-task-2"
+    assert second_response.metadata["cache_stats"]["status"] == "hit"
+
+
+def test_data_agent_force_refresh_bypasses_existing_cache(tmp_path: Path) -> None:
+    request_payload = {
+        "universe": "CSI500",
+        "start_date": "2020-01-01",
+        "end_date": "2025-12-31",
+    }
+    first_agent = DataAgent(
+        config=_config(tmp_path),
+        providers={"akshare": FakeMarketDataProvider()},
+        calendar_providers={"akshare": FakeTradingCalendarProvider()},
+    )
+    first_agent.run(AgentRequest.create(request_payload, task_id="data-task-1"))
+
+    second_provider = FakeMarketDataProvider()
+    second_calendar = FakeTradingCalendarProvider()
+    second_agent = DataAgent(
+        config=_config(tmp_path),
+        providers={"akshare": second_provider},
+        calendar_providers={"akshare": second_calendar},
+    )
+    refreshed_payload = {**request_payload, "force_refresh": True}
+
+    response = second_agent.run(AgentRequest.create(refreshed_payload, task_id="data-task-2"))
+
+    assert response.status == "success"
+    assert response.output["state"] == "stored"
+    assert response.output["cache_stats"]["status"] == "refreshed"
+    assert second_provider.resolve_calls == 1
+    assert second_provider.download_calls == 2
+    assert second_calendar.calls == 1
 
 
 def test_data_agent_run_returns_error_for_bad_payload(tmp_path: Path) -> None:
@@ -210,3 +297,28 @@ def test_data_agent_download_ohlcv_uses_explicit_symbols(tmp_path: Path) -> None
 
     assert len(market_data) == 1
     assert market_data.iloc[0]["symbol"] == "000001"
+
+
+class ExplodingMarketDataProvider:
+    name = "akshare"
+
+    def resolve_symbols(self, universe: str) -> list[str]:
+        raise AssertionError("resolve_symbols should not be called on cache hit.")
+
+    def download_symbol_ohlcv(
+        self,
+        *,
+        symbol: str,
+        start_date,
+        end_date,
+        frequency: str,
+        adjust: str,
+    ) -> pd.DataFrame:
+        raise AssertionError("download_symbol_ohlcv should not be called on cache hit.")
+
+
+class ExplodingTradingCalendarProvider:
+    name = "akshare"
+
+    def get_trading_days(self, *, start_date: date, end_date: date) -> list[date]:
+        raise AssertionError("get_trading_days should not be called on cache hit.")
