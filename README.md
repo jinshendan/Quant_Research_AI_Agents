@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-2：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议和 DataAgent 骨架。
+> 当前项目处于早期搭建阶段。已完成 Day 1-3：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架和 AkShare OHLCV 下载。
 
 ## Why This Project
 
@@ -43,12 +43,14 @@ Implemented:
 - structured logging
 - runtime configuration
 - common Agent request/response protocol
-- `DataAgent` validation skeleton
-- unit tests for logging, config, protocol models, and DataAgent validation
+- `DataAgent` validation and raw OHLCV download
+- AkShare provider integration
+- OHLCV schema normalization
+- raw data CSV persistence
+- unit tests for logging, config, protocol models, DataAgent, and market data provider behavior
 
 Not implemented yet:
 
-- real OHLCV download
 - missing-value cleaning
 - suspended-stock handling
 - trading-calendar alignment
@@ -69,7 +71,8 @@ Not implemented yet:
 └── quant-agent/
     ├── agents/
     │   ├── __init__.py
-    │   └── data_agent.py
+    │   ├── data_agent.py
+    │   └── market_data_provider.py
     ├── core/
     │   ├── __init__.py
     │   ├── config.py
@@ -153,8 +156,9 @@ python -m mypy core agents tests app.py
 
 ## DataAgent Example
 
-The current `DataAgent` only validates market data requests and prepares storage directories.
-Real OHLCV downloading starts in Day 3.
+The current `DataAgent` validates a market data request, downloads raw A-share
+OHLCV data through AkShare, normalizes the schema, and writes a CSV into
+`data/raw/`.
 
 ```python
 from agents.data_agent import DataAgent
@@ -172,6 +176,40 @@ request = AgentRequest.create(
 
 response = DataAgent().run(request)
 print(response.to_dict())
+```
+
+For direct stock downloads, `universe` can be a six-digit A-share code:
+
+```python
+request = AgentRequest.create(
+    {
+        "universe": "000001",
+        "start_date": "2024-01-02",
+        "end_date": "2024-01-03",
+    }
+)
+```
+
+For controlled batches, pass explicit symbols:
+
+```python
+request = AgentRequest.create(
+    {
+        "universe": "custom_batch",
+        "symbols": ["000001", "000002"],
+        "start_date": "2024-01-02",
+        "end_date": "2024-01-03",
+    }
+)
+```
+
+Supported AkShare index aliases are `CSI300`, `CSI500`, `CSI1000`, and `SSE50`.
+
+Current raw OHLCV columns:
+
+```text
+date, symbol, open, high, low, close, volume, amount,
+amplitude, pct_change, price_change, turnover_rate
 ```
 
 ## Configuration

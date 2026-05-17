@@ -6,9 +6,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.idea/
 
 quant-agent/.venv/
 quant-agent/.pytest_cache/
 quant-agent/.ruff_cache/
 quant-agent/.mypy_cache/
-

@@ -130,6 +130,37 @@ Expected DataAgent payload at this stage:
 DataAgent currently supports only request validation and execution metadata.
 Real OHLCV download is intentionally deferred to Day 3.
 
+## Day 3 --- AkShare OHLCV Download
+
+Implemented in `quant-agent/`:
+
+-   AkShare market data provider in
+    `quant-agent/agents/market_data_provider.py`
+-   A-share OHLCV normalization from AkShare Chinese columns to the project
+    schema
+-   DataAgent provider injection for testable market data boundaries
+-   DataAgent raw OHLCV download and CSV persistence into `data/raw/`
+-   support for explicit `payload.symbols`
+-   support for direct six-digit stock-code universes
+-   support for AkShare index aliases: `CSI300`, `CSI500`, `CSI1000`,
+    `SSE50`
+-   tests for provider normalization, symbol resolution, download calls, and
+    DataAgent raw-data persistence
+
+Current raw OHLCV schema:
+
+```text
+date, symbol, open, high, low, close, volume, amount,
+amplitude, pct_change, price_change, turnover_rate
+```
+
+Current DataAgent output points to a raw CSV path instead of embedding the full
+DataFrame in the response envelope. This keeps agent responses small and keeps
+the data handoff explicit until DuckDB persistence is added on Day 6.
+
+Cleaning missing values, suspended-stock handling, and trading-calendar
+alignment are intentionally deferred to Day 4 and Day 5.
+
 ------------------------------------------------------------------------
 
 # Memory Schema
