@@ -318,6 +318,59 @@ Stale manifests are treated as cache misses instead of hard failures. The
 cache currently has no time-to-live policy; callers can refresh explicitly with
 `force_refresh` when they need to re-query the data provider.
 
+## Day 8 --- HypothesisAgent
+
+Implemented in `quant-agent/`:
+
+-   structured hypothesis generation in
+    `quant-agent/agents/hypothesis_agent.py`
+-   validated request model `HypothesisSpec`
+-   reusable hypothesis seeds through `HypothesisTemplate`
+-   deterministic template-based generation for reproducible offline tests
+-   standardized `AgentRequest` and `AgentResponse` envelopes
+-   structured logs for validation, generation, and validation failures
+-   prompt guidance in `quant-agent/prompts/hypothesis.md`
+-   tests for request normalization, validation errors, structured outputs, and
+    template injection
+
+Current HypothesisAgent payload:
+
+```json
+{
+  "objective": "Find short-term alpha opportunities",
+  "market": "a_share",
+  "universe": "CSI500",
+  "horizon": "short",
+  "max_hypotheses": 5,
+  "constraints": ["avoid future leakage"]
+}
+```
+
+Current HypothesisAgent output:
+
+```text
+state = hypotheses_generated
+hypothesis_count
+generation_method
+hypotheses[]
+```
+
+Each hypothesis contains:
+
+-   hypothesis id
+-   title and description
+-   rationale
+-   candidate signals
+-   expected direction
+-   required data
+-   risk flags
+-   test plan
+
+Day 8 intentionally does not call an external LLM API. The deterministic
+generator gives the system a stable agent contract first; a later LLM-backed
+generator can be added behind the same `HypothesisTemplate`/agent output shape
+once evaluation and memory loops exist.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

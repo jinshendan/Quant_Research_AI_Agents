@@ -6,6 +6,11 @@ from agents.duckdb_store import (
     MarketDataStorageContext,
     MarketDataStorageResult,
 )
+from agents.hypothesis_agent import (
+    HypothesisAgent,
+    HypothesisSpec,
+    HypothesisTemplate,
+)
 from agents.market_data_cache import (
     MarketDataCache,
     MarketDataCacheEntry,
@@ -27,6 +32,9 @@ __all__ = [
     "CalendarAlignmentResult",
     "DataAgent",
     "DuckDBMarketDataStore",
+    "HypothesisAgent",
+    "HypothesisSpec",
+    "HypothesisTemplate",
     "MarketDataCache",
     "MarketDataCacheEntry",
     "MarketDataCacheIdentity",

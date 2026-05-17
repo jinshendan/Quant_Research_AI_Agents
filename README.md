@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-7：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化和市场数据缓存。
+> 当前项目处于早期搭建阶段。已完成 Day 1-8：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存和 HypothesisAgent。
 
 ## Why This Project
 
@@ -53,11 +53,12 @@ Implemented:
 - aligned data CSV persistence
 - DuckDB persistence for aligned OHLCV and run metadata
 - file-backed market data cache with cache-hit and force-refresh behavior
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, and market data cache behavior
+- `HypothesisAgent` for structured alpha hypothesis generation
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, and HypothesisAgent behavior
 
 Not implemented yet:
 
-- factor generation
+- factor templates and feature generation
 - backtesting
 - memory and report generation
 - Streamlit dashboard
@@ -75,6 +76,7 @@ Not implemented yet:
     │   ├── __init__.py
     │   ├── data_agent.py
     │   ├── duckdb_store.py
+    │   ├── hypothesis_agent.py
     │   ├── market_data_cache.py
     │   ├── market_data_provider.py
     │   ├── ohlcv_cleaner.py
@@ -288,6 +290,44 @@ Default database path:
 quant-agent/data/processed/quant_agent.duckdb
 ```
 
+## HypothesisAgent Example
+
+`HypothesisAgent` converts a research objective into structured, testable alpha
+hypotheses. The current implementation uses deterministic templates so tests are
+reproducible and no external LLM key is required.
+
+```python
+from agents.hypothesis_agent import HypothesisAgent
+from core.models import AgentRequest
+
+request = AgentRequest.create(
+    {
+        "objective": "Find short-term alpha opportunities",
+        "market": "a_share",
+        "universe": "CSI500",
+        "horizon": "short",
+        "max_hypotheses": 3,
+        "constraints": ["avoid future leakage", "prefer liquid names"],
+    }
+)
+
+response = HypothesisAgent().run(request)
+print(response.output["hypotheses"])
+```
+
+Each hypothesis includes:
+
+- title and description
+- rationale
+- candidate signals
+- expected direction
+- required data
+- risk flags
+- test plan
+
+This output is intentionally shaped for Day 9 factor templates and Day 10
+feature generation.
+
 ## Configuration
 
 `AppConfig` reads optional environment variables:
@@ -318,8 +358,10 @@ Week 1:
 - Day 5: trading-calendar alignment
 - Day 6: DuckDB storage
 - Day 7: file-backed market data cache
+- Day 8: structured HypothesisAgent
 
-Later weeks cover factor generation, backtesting, evaluation, memory, reporting, and dashboard.
+Next steps cover factor templates, feature generation, backtesting, evaluation,
+memory, reporting, and dashboard.
 
 ## Engineering Principles
 
