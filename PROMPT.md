@@ -473,7 +473,7 @@ Perfect architecture later.
 
 # Current Incremental Status
 
-Implemented through Day 20:
+Implemented through Day 21:
 
 - DataAgent ingestion, cleaning, trading-calendar alignment, DuckDB storage, and cache
 - HypothesisAgent deterministic alpha hypothesis generation
@@ -486,8 +486,9 @@ Implemented through Day 20:
 - annualized Sharpe calculation from the long/short return series
 - drawdown curve and max drawdown calculation from the long/short return series
 - final result JSON generation from BacktestAgent metrics and previews
+- deterministic benchmark tests against the generated result JSON
 
 Next implementation focus:
 
-Day 21 should run benchmark tests against the generated backtest result JSON
-without adding memory, report generation, or dashboard features yet.
+Day 22 should build MemoryAgent without adding report generation or dashboard
+features yet.

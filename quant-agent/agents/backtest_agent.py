@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal, cast
@@ -18,6 +18,7 @@ from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
 
 FactorDirection = Literal["positive", "negative"]
+BenchmarkThresholdValue = int | float | None
 
 IDENTITY_COLUMNS = ("date", "symbol")
 CLOSE_COLUMN = "close"
@@ -44,6 +45,47 @@ MAX_FORWARD_RETURN_DAYS = 60
 MIN_ANNUALIZATION_FACTOR = 1
 MAX_ANNUALIZATION_FACTOR = 366
 SUPPORTED_FACTOR_DIRECTIONS = {"positive", "negative"}
+DEFAULT_BENCHMARK_THRESHOLDS: dict[str, BenchmarkThresholdValue] = {
+    "min_usable_rows": 1,
+    "min_portfolio_dates": 1,
+    "min_ic_dates": 1,
+    "min_rank_ic_dates": 1,
+    "min_mean_ic": None,
+    "min_mean_rank_ic": None,
+    "min_sharpe": None,
+    "min_total_return": None,
+    "max_drawdown_abs": None,
+}
+BENCHMARK_TEST_DEFINITIONS = (
+    ("min_usable_rows", "usable_row_count", "summary.usable_row_count", ">="),
+    (
+        "min_portfolio_dates",
+        "portfolio_date_count",
+        "summary.portfolio_date_count",
+        ">=",
+    ),
+    ("min_ic_dates", "ic_date_count", "summary.ic_date_count", ">="),
+    (
+        "min_rank_ic_dates",
+        "rank_ic_date_count",
+        "summary.rank_ic_date_count",
+        ">=",
+    ),
+    ("min_mean_ic", "mean_ic", "summary.mean_ic", ">="),
+    ("min_mean_rank_ic", "mean_rank_ic", "summary.mean_rank_ic", ">="),
+    ("min_sharpe", "sharpe", "summary.sharpe", ">="),
+    ("min_total_return", "total_return", "summary.total_return", ">="),
+    (
+        "max_drawdown_abs",
+        "max_drawdown_abs",
+        "metrics.drawdown.max_drawdown_abs",
+        "<=",
+    ),
+)
+
+
+def default_benchmark_thresholds() -> dict[str, BenchmarkThresholdValue]:
+    return dict(DEFAULT_BENCHMARK_THRESHOLDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +101,9 @@ class BacktestSpec:
     quantile_count: int = DEFAULT_QUANTILE_COUNT
     annualization_factor: int = DEFAULT_ANNUALIZATION_FACTOR
     result_json_path: Path | None = None
+    benchmark_thresholds: dict[str, BenchmarkThresholdValue] = field(
+        default_factory=default_benchmark_thresholds
+    )
     preview_rows: int = DEFAULT_PREVIEW_ROWS
 
     @classmethod
@@ -67,6 +112,7 @@ class BacktestSpec:
         factor_manifest_path = _optional_path(payload, "factor_manifest_path")
         aligned_data_path = _optional_path(payload, "aligned_data_path")
         result_json_path = _optional_path(payload, "result_json_path")
+        benchmark_thresholds = _optional_benchmark_thresholds(payload)
         if factor_matrix_path is None and factor_manifest_path is None:
             msg = "payload.factor_matrix_path or payload.factor_manifest_path is required."
             raise ValueError(msg)
@@ -113,6 +159,7 @@ class BacktestSpec:
             quantile_count=quantile_count,
             annualization_factor=annualization_factor,
             result_json_path=result_json_path,
+            benchmark_thresholds=benchmark_thresholds,
             preview_rows=preview_rows,
         )
 
@@ -135,6 +182,7 @@ class BacktestSpec:
             "result_json_path": (
                 str(self.result_json_path) if self.result_json_path else None
             ),
+            "benchmark_thresholds": dict(self.benchmark_thresholds),
             "preview_rows": self.preview_rows,
         }
 
@@ -419,11 +467,7 @@ class BacktestAgent:
                 sharpe_result=sharpe_result,
                 drawdown_result=drawdown_result,
             )
-            result_json_path = save_backtest_result_json(
-                result_json,
-                spec.result_json_path,
-            )
-        except (OSError, TypeError, ValueError) as exc:
+        except (TypeError, ValueError) as exc:
             elapsed = perf_counter() - started_at
             self.logger.warning(
                 "Result JSON generation failed.",
@@ -452,9 +496,55 @@ class BacktestAgent:
             "Generated result JSON.",
             extra={"action": "generate_result_json", "status": "success"},
         )
+        self.logger.info(
+            "Running benchmark tests.",
+            extra={"action": "run_benchmark_tests", "status": "running"},
+        )
+        try:
+            benchmark_tests = run_benchmark_tests(
+                result_json,
+                spec.benchmark_thresholds,
+            )
+            result_json = attach_benchmark_tests_to_result_json(
+                result_json,
+                benchmark_tests,
+            )
+            result_json_path = save_backtest_result_json(
+                result_json,
+                spec.result_json_path,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            elapsed = perf_counter() - started_at
+            self.logger.warning(
+                "Benchmark tests failed to run.",
+                extra={"action": "run_benchmark_tests", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    factor_matrix_path=result.factor_matrix_path,
+                    aligned_data_path=result.aligned_data_path,
+                    factor_column=result.factor_column,
+                    portfolio_date_count=len(result.portfolio_returns),
+                    usable_row_count=result.stats["usable_row_count"],
+                    ic_date_count=ic_result.stats["ic_date_count"],
+                    mean_ic=ic_result.stats["mean_ic"],
+                    rank_ic_date_count=rank_ic_result.stats["rank_ic_date_count"],
+                    mean_rank_ic=rank_ic_result.stats["mean_rank_ic"],
+                    sharpe=sharpe_result.stats["sharpe"],
+                    max_drawdown=drawdown_result.stats["max_drawdown"],
+                ),
+            )
+        elapsed = perf_counter() - started_at
+        self.logger.info(
+            "Ran benchmark tests.",
+            extra={"action": "run_benchmark_tests", "status": "success"},
+        )
         return AgentResponse.success(
             output={
-                "state": "backtest_result_generated",
+                "state": "backtest_benchmark_tested",
                 "request": spec.to_dict(),
                 "factor_matrix_path": str(result.factor_matrix_path),
                 "aligned_data_path": str(result.aligned_data_path),
@@ -493,9 +583,11 @@ class BacktestAgent:
                 "rank_ic_stats": rank_ic_result.stats,
                 "sharpe_stats": sharpe_result.stats,
                 "drawdown_stats": drawdown_result.stats,
+                "benchmark_tests": benchmark_tests,
+                "benchmark_status": benchmark_tests["status"],
                 "result_json": result_json,
                 "result_json_path": str(result_json_path) if result_json_path else None,
-                "next_action": "Run benchmark tests in Day 21.",
+                "next_action": "Build MemoryAgent in Day 22.",
             },
             metadata=self._metadata(
                 request,
@@ -511,6 +603,7 @@ class BacktestAgent:
                 mean_rank_ic=rank_ic_result.stats["mean_rank_ic"],
                 sharpe=sharpe_result.stats["sharpe"],
                 max_drawdown=drawdown_result.stats["max_drawdown"],
+                benchmark_status=benchmark_tests["status"],
                 result_json_path=result_json_path,
             ),
         )
@@ -602,6 +695,7 @@ class BacktestAgent:
         mean_rank_ic: float | None = None,
         sharpe: float | None = None,
         max_drawdown: float | None = None,
+        benchmark_status: str | None = None,
         result_json_path: Path | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
@@ -631,6 +725,8 @@ class BacktestAgent:
             metadata["sharpe"] = sharpe
         if max_drawdown is not None:
             metadata["max_drawdown"] = max_drawdown
+        if benchmark_status is not None:
+            metadata["benchmark_status"] = benchmark_status
         if result_json_path is not None:
             metadata["result_json_path"] = str(result_json_path)
         return metadata
@@ -1225,6 +1321,73 @@ def generate_backtest_result_json(
     return document
 
 
+def run_benchmark_tests(
+    result_json: Mapping[str, Any],
+    thresholds: Mapping[str, BenchmarkThresholdValue] | None = None,
+) -> dict[str, Any]:
+    """Run deterministic benchmark checks against a backtest result JSON."""
+
+    normalized_thresholds = (
+        default_benchmark_thresholds()
+        if thresholds is None
+        else _merge_benchmark_thresholds(thresholds, source="benchmark_thresholds")
+    )
+    tests: list[dict[str, Any]] = []
+    for threshold_key, name, metric_path, operator in BENCHMARK_TEST_DEFINITIONS:
+        threshold = normalized_thresholds[threshold_key]
+        if threshold is None:
+            continue
+        actual = _lookup_metric(result_json, metric_path)
+        actual_number = _finite_number_or_none(actual)
+        passed = (
+            actual_number is not None
+            and (
+                actual_number >= threshold
+                if operator == ">="
+                else actual_number <= threshold
+            )
+        )
+        tests.append(
+            {
+                "name": name,
+                "threshold_key": threshold_key,
+                "metric": metric_path,
+                "operator": operator,
+                "threshold": threshold,
+                "actual": actual_number,
+                "passed": passed,
+            }
+        )
+
+    passed_count = sum(1 for test in tests if test["passed"])
+    failed_count = len(tests) - passed_count
+    document = {
+        "schema_version": 1,
+        "status": "passed" if failed_count == 0 else "failed",
+        "test_count": len(tests),
+        "passed_count": passed_count,
+        "failed_count": failed_count,
+        "thresholds": normalized_thresholds,
+        "tests": tests,
+    }
+    json.dumps(document, ensure_ascii=True, allow_nan=False)
+    return document
+
+
+def attach_benchmark_tests_to_result_json(
+    result_json: Mapping[str, Any],
+    benchmark_tests: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Attach benchmark results to the final downstream result JSON."""
+
+    document = dict(result_json)
+    document["state"] = "backtest_benchmark_tested"
+    document["benchmark_tests"] = dict(benchmark_tests)
+    document["next_action"] = "Build MemoryAgent in Day 22."
+    json.dumps(document, ensure_ascii=True, allow_nan=False)
+    return document
+
+
 def save_backtest_result_json(
     result_json: Mapping[str, Any],
     result_json_path: Path | None,
@@ -1337,6 +1500,51 @@ def _optional_factor_direction(payload: Mapping[str, Any]) -> FactorDirection:
     return cast(FactorDirection, normalized)
 
 
+def _optional_benchmark_thresholds(
+    payload: Mapping[str, Any],
+) -> dict[str, BenchmarkThresholdValue]:
+    value = payload.get("benchmark_thresholds")
+    if value is None:
+        return default_benchmark_thresholds()
+    if not isinstance(value, Mapping):
+        msg = "payload.benchmark_thresholds must be an object when provided."
+        raise ValueError(msg)
+    return _merge_benchmark_thresholds(value, source="payload.benchmark_thresholds")
+
+
+def _merge_benchmark_thresholds(
+    overrides: Mapping[str, Any],
+    *,
+    source: str,
+) -> dict[str, BenchmarkThresholdValue]:
+    thresholds = default_benchmark_thresholds()
+    unknown_keys = sorted(set(overrides) - set(DEFAULT_BENCHMARK_THRESHOLDS))
+    if unknown_keys:
+        msg = f"{source} has unsupported keys: {', '.join(unknown_keys)}."
+        raise ValueError(msg)
+
+    for key, value in overrides.items():
+        thresholds[str(key)] = _benchmark_threshold_value(value, key=key, source=source)
+    return thresholds
+
+
+def _benchmark_threshold_value(
+    value: Any,
+    *,
+    key: str,
+    source: str,
+) -> BenchmarkThresholdValue:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        msg = f"{source}.{key} must be a finite number or null."
+        raise ValueError(msg)
+    if not np.isfinite(value):
+        msg = f"{source}.{key} must be a finite number or null."
+        raise ValueError(msg)
+    return value
+
+
 def _optional_int(
     payload: Mapping[str, Any],
     key: str,
@@ -1352,4 +1560,21 @@ def _optional_int(
     if value < minimum or value > maximum:
         msg = f"payload.{key} must be between {minimum} and {maximum}."
         raise ValueError(msg)
+    return value
+
+
+def _lookup_metric(document: Mapping[str, Any], metric_path: str) -> Any:
+    node: Any = document
+    for key in metric_path.split("."):
+        if not isinstance(node, Mapping) or key not in node:
+            return None
+        node = node[key]
+    return node
+
+
+def _finite_number_or_none(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    if not np.isfinite(value):
+        return None
     return value

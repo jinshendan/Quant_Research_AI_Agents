@@ -660,7 +660,7 @@ Implemented in `quant-agent/`:
 -   tests for manifest-driven runs, input validation, factor selection, and
     long/short return construction
 
-Current BacktestAgent payload:
+Day 15 initial BacktestAgent payload:
 
 ```json
 {
@@ -673,7 +673,7 @@ Current BacktestAgent payload:
 }
 ```
 
-Current BacktestAgent output:
+Day 15 initial BacktestAgent output:
 
 ```text
 state = backtest_built
@@ -864,6 +864,57 @@ file.
 
 Day 20 intentionally does not run benchmark tests. That remains scoped to Day
 21.
+
+## Day 21 --- Benchmark Tests
+
+Implemented in `quant-agent/`:
+
+-   optional `payload.benchmark_thresholds` in
+    `quant-agent/agents/backtest_agent.py`
+-   default structural benchmark thresholds for usable rows, portfolio dates,
+    IC dates, and RankIC dates
+-   optional metric thresholds for mean IC, mean RankIC, Sharpe, total return,
+    and absolute max drawdown
+-   `run_benchmark_tests(...)` for deterministic checks against the Day 20
+    result JSON
+-   `attach_benchmark_tests_to_result_json(...)` for embedding benchmark
+    output into the downstream JSON artifact
+-   integration into `BacktestAgent.run(...)` after result JSON generation and
+    before optional JSON persistence
+-   tests for threshold validation, passed benchmark integration, failed
+    benchmark reporting, and persisted JSON equality
+
+Current BacktestAgent benchmark output fields:
+
+```text
+benchmark_tests
+benchmark_status
+```
+
+The benchmark result schema currently includes:
+
+```text
+schema_version
+status
+test_count
+passed_count
+failed_count
+thresholds
+tests
+```
+
+Each entry in `tests` records the test name, threshold key, metric path,
+operator, threshold, actual value, and boolean pass/fail status. Running
+benchmark tests does not turn the agent response into an error when a factor
+fails a threshold; the benchmark status is data that downstream agents can use
+for ranking, memory storage, and reporting.
+
+After Day 21, successful BacktestAgent responses use:
+
+```text
+state = backtest_benchmark_tested
+next_action = Build MemoryAgent in Day 22.
+```
 
 ------------------------------------------------------------------------
 

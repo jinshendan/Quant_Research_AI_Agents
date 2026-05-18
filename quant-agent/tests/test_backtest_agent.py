@@ -14,6 +14,7 @@ from agents.backtest_agent import (
     compute_information_coefficient,
     compute_rank_information_coefficient,
     compute_sharpe_ratio,
+    run_benchmark_tests,
     save_backtest_result_json,
     normalize_aligned_prices,
     normalize_factor_matrix,
@@ -109,6 +110,11 @@ def test_backtest_spec_accepts_manifest_only(tmp_path: Path) -> None:
             "factor_column": "factor__alpha",
             "forward_return_days": 2,
             "quantile_count": 3,
+            "benchmark_thresholds": {
+                "min_usable_rows": 10,
+                "min_sharpe": 1.0,
+                "max_drawdown_abs": 0.2,
+            },
             "preview_rows": 0,
         }
     )
@@ -119,12 +125,26 @@ def test_backtest_spec_accepts_manifest_only(tmp_path: Path) -> None:
     assert spec.forward_return_days == 2
     assert spec.quantile_count == 3
     assert spec.annualization_factor == 252
+    assert spec.benchmark_thresholds["min_usable_rows"] == 10
+    assert spec.benchmark_thresholds["min_sharpe"] == 1.0
+    assert spec.benchmark_thresholds["max_drawdown_abs"] == 0.2
+    assert spec.benchmark_thresholds["min_mean_ic"] is None
     assert spec.preview_rows == 0
 
 
 def test_backtest_spec_rejects_missing_factor_source() -> None:
     with pytest.raises(ValueError, match="factor_matrix_path"):
         BacktestSpec.from_payload({"aligned_data_path": "aligned.csv"})
+
+
+def test_backtest_spec_rejects_unknown_benchmark_threshold(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unsupported keys"):
+        BacktestSpec.from_payload(
+            {
+                "factor_manifest_path": str(tmp_path / "factor_matrix.manifest.json"),
+                "benchmark_thresholds": {"unknown": 1},
+            }
+        )
 
 
 def test_normalize_factor_matrix_rejects_missing_identity_columns() -> None:
@@ -158,6 +178,17 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
                 "factor_column": "factor__alpha",
                 "quantile_count": 3,
                 "result_json_path": str(tmp_path / "results" / "backtest.json"),
+                "benchmark_thresholds": {
+                    "min_usable_rows": 12,
+                    "min_portfolio_dates": 2,
+                    "min_ic_dates": 2,
+                    "min_rank_ic_dates": 2,
+                    "min_mean_ic": 0.9,
+                    "min_mean_rank_ic": 0.9,
+                    "min_sharpe": 1.0,
+                    "min_total_return": 0.01,
+                    "max_drawdown_abs": 0.05,
+                },
                 "preview_rows": 5,
             },
             task_id="backtest-task-1",
@@ -165,7 +196,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     )
 
     assert response.status == "success"
-    assert response.output["state"] == "backtest_result_generated"
+    assert response.output["state"] == "backtest_benchmark_tested"
     assert response.output["factor_matrix_path"] == str(factor_matrix_path.resolve())
     assert response.output["aligned_data_path"] == str(aligned_path.resolve())
     assert response.output["factor_column"] == "factor__alpha"
@@ -192,6 +223,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.metadata["mean_rank_ic"] == pytest.approx(1.0)
     assert response.metadata["sharpe"] == pytest.approx(33.67491648096547)
     assert response.metadata["max_drawdown"] == pytest.approx(0.0)
+    assert response.metadata["benchmark_status"] == "passed"
     assert response.metadata["result_json_path"] == str(
         tmp_path / "results" / "backtest.json"
     )
@@ -251,9 +283,15 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.output["drawdown_stats"]["total_return"] == pytest.approx(0.155)
     assert response.output["drawdown_stats"]["max_drawdown"] == pytest.approx(0.0)
     assert response.output["drawdown_stats"]["drawdown_period_count"] == 0
+    benchmark_tests = response.output["benchmark_tests"]
+    assert response.output["benchmark_status"] == "passed"
+    assert benchmark_tests["status"] == "passed"
+    assert benchmark_tests["test_count"] == 9
+    assert benchmark_tests["passed_count"] == 9
+    assert benchmark_tests["failed_count"] == 0
     result_json = response.output["result_json"]
     assert result_json["schema_version"] == 1
-    assert result_json["state"] == "backtest_result_generated"
+    assert result_json["state"] == "backtest_benchmark_tested"
     assert result_json["task_id"] == "backtest-task-1"
     assert result_json["inputs"]["factor_column"] == "factor__alpha"
     assert result_json["summary"]["mean_rank_ic"] == pytest.approx(1.0)
@@ -261,6 +299,8 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert result_json["summary"]["max_drawdown"] == pytest.approx(0.0)
     assert result_json["metrics"]["drawdown"] == response.output["drawdown_stats"]
     assert result_json["previews"]["portfolio_returns"] == response.output["preview"]
+    assert result_json["benchmark_tests"] == benchmark_tests
+    assert result_json["next_action"] == "Build MemoryAgent in Day 22."
     result_json_path = Path(response.output["result_json_path"])
     assert result_json_path.is_file()
     assert json.loads(result_json_path.read_text(encoding="utf-8")) == result_json
@@ -270,6 +310,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert "BacktestAgent | compute_sharpe | success" in stream.getvalue()
     assert "BacktestAgent | compute_drawdown | success" in stream.getvalue()
     assert "BacktestAgent | generate_result_json | success" in stream.getvalue()
+    assert "BacktestAgent | run_benchmark_tests | success" in stream.getvalue()
 
 
 def test_backtest_agent_uses_single_factor_without_explicit_column(
@@ -292,6 +333,7 @@ def test_backtest_agent_uses_single_factor_without_explicit_column(
 
     assert response.status == "success"
     assert response.output["factor_column"] == "factor__alpha"
+    assert response.output["benchmark_status"] == "passed"
     assert response.output["result_json_path"] is None
     assert response.output["preview"] == []
 
@@ -562,3 +604,50 @@ def test_save_backtest_result_json_is_optional(tmp_path: Path) -> None:
 
     assert saved_path == path
     assert json.loads(path.read_text(encoding="utf-8")) == result_json
+
+
+def test_run_benchmark_tests_reports_failures() -> None:
+    result_json = {
+        "summary": {
+            "usable_row_count": 8,
+            "portfolio_date_count": 2,
+            "ic_date_count": 2,
+            "rank_ic_date_count": 2,
+            "mean_ic": 0.04,
+            "mean_rank_ic": 0.03,
+            "sharpe": 0.8,
+            "total_return": -0.01,
+        },
+        "metrics": {"drawdown": {"max_drawdown_abs": 0.25}},
+    }
+
+    benchmark_tests = run_benchmark_tests(
+        result_json,
+        {
+            "min_usable_rows": 10,
+            "min_portfolio_dates": 2,
+            "min_ic_dates": 2,
+            "min_rank_ic_dates": 2,
+            "min_mean_ic": 0.05,
+            "min_mean_rank_ic": 0.05,
+            "min_sharpe": 1.0,
+            "min_total_return": 0.0,
+            "max_drawdown_abs": 0.20,
+        },
+    )
+
+    assert benchmark_tests["status"] == "failed"
+    assert benchmark_tests["test_count"] == 9
+    assert benchmark_tests["passed_count"] == 3
+    assert benchmark_tests["failed_count"] == 6
+    failed_names = {
+        test["name"] for test in benchmark_tests["tests"] if not test["passed"]
+    }
+    assert failed_names == {
+        "usable_row_count",
+        "mean_ic",
+        "mean_rank_ic",
+        "sharpe",
+        "total_return",
+        "max_drawdown_abs",
+    }

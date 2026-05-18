@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-20：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算和最终 result JSON 生成。
+> 当前项目处于早期搭建阶段。已完成 Day 1-21：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成和 benchmark tests。
 
 ## Why This Project
 
@@ -66,11 +66,11 @@ Implemented:
 - annualized Sharpe calculation for the long/short return series
 - drawdown curve and max drawdown calculation for the long/short return series
 - final backtest result JSON generation with optional file persistence
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, and result JSON generation
+- deterministic benchmark tests against backtest result JSON
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, and benchmark tests
 
 Not implemented yet:
 
-- benchmark evaluation
 - memory and report generation
 - Streamlit dashboard
 
@@ -477,7 +477,8 @@ lookback window, signal tags, and risk flags.
 `BacktestAgent` consumes a saved factor matrix, resolves the aligned OHLCV
 source from the Day 14 manifest when available, computes forward returns from
 `close`, builds a simple long/short factor return series, and computes Pearson
-IC, Spearman RankIC, annualized Sharpe, drawdown, and a final result JSON.
+IC, Spearman RankIC, annualized Sharpe, drawdown, a final result JSON, and
+benchmark tests.
 
 ```python
 from agents.backtest_agent import BacktestAgent
@@ -493,6 +494,14 @@ request = AgentRequest.create(
         "annualization_factor": 252,
         "preview_rows": 5,
         "result_json_path": "results/backtests/csi500_short_horizon.json",
+        "benchmark_thresholds": {
+            "min_usable_rows": 100,
+            "min_ic_dates": 20,
+            "min_rank_ic_dates": 20,
+            "min_mean_rank_ic": 0.02,
+            "min_sharpe": 0.5,
+            "max_drawdown_abs": 0.25,
+        },
     }
 )
 
@@ -506,6 +515,8 @@ print(response.output["rank_ic_stats"])
 print(response.output["sharpe_stats"])
 print(response.output["drawdown_curve_preview"])
 print(response.output["drawdown_stats"])
+print(response.output["benchmark_status"])
+print(response.output["benchmark_tests"])
 print(response.output["result_json"])
 print(response.output["result_json_path"])
 ```
@@ -533,6 +544,13 @@ benchmarking, memory, and reporting agents. It includes a schema version,
 request echo, resolved inputs, summary metrics, full metric groups, preview
 records, and a next-action hint. When `result_json_path` is provided,
 `BacktestAgent` writes the same JSON document to disk atomically.
+
+Benchmark tests are deterministic quality gates over the generated result JSON.
+Defaults check that the backtest produced usable rows, portfolio dates, IC
+dates, and RankIC dates. `benchmark_thresholds` can add or override thresholds
+for `mean_ic`, `mean_rank_ic`, `sharpe`, `total_return`, and
+`max_drawdown_abs`. Benchmark failures are reported as structured
+`benchmark_tests` output rather than transport-level agent errors.
 
 ## Configuration
 
@@ -577,8 +595,9 @@ Week 1:
 - Day 18: annualized Sharpe calculation
 - Day 19: drawdown calculation
 - Day 20: final result JSON generation
+- Day 21: benchmark tests
 
-Next steps cover benchmark evaluation, memory, reporting, and dashboard.
+Next steps cover memory, reporting, and dashboard.
 
 ## Engineering Principles
 

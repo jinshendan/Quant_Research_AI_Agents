@@ -9,11 +9,13 @@ from agents.backtest_agent import (
     InformationCoefficientResult,
     RankInformationCoefficientResult,
     SharpeResult,
+    attach_benchmark_tests_to_result_json,
     compute_drawdown,
-    generate_backtest_result_json,
     compute_information_coefficient,
     compute_rank_information_coefficient,
     compute_sharpe_ratio,
+    generate_backtest_result_json,
+    run_benchmark_tests,
     save_backtest_result_json,
 )
 from agents.data_agent import DataAgent, MarketDataSpec
@@ -122,11 +124,13 @@ __all__ = [
     "align_to_trading_calendar",
     "apply_rank_transforms",
     "apply_rolling_features",
+    "attach_benchmark_tests_to_result_json",
     "clean_ohlcv",
     "compute_drawdown",
     "compute_information_coefficient",
     "compute_rank_information_coefficient",
     "compute_sharpe_ratio",
     "generate_backtest_result_json",
+    "run_benchmark_tests",
     "save_backtest_result_json",
 ]
