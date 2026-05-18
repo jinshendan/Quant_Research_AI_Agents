@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-16：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架和 IC 计算。
+> 当前项目处于早期搭建阶段。已完成 Day 1-17：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC 和 RankIC 计算。
 
 ## Why This Project
 
@@ -62,11 +62,12 @@ Implemented:
 - file-backed factor matrix persistence with lineage manifests
 - `BacktestAgent` for consuming saved factor matrices and building long/short return series
 - Pearson IC calculation by trading date for factor/forward-return panels
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, and IC calculation
+- Spearman RankIC calculation by trading date for factor/forward-return panels
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, and RankIC calculation
 
 Not implemented yet:
 
-- RankIC, Sharpe, drawdown, and benchmark evaluation metrics
+- Sharpe, drawdown, and benchmark evaluation metrics
 - memory and report generation
 - Streamlit dashboard
 
@@ -473,8 +474,8 @@ lookback window, signal tags, and risk flags.
 `BacktestAgent` consumes a saved factor matrix, resolves the aligned OHLCV
 source from the Day 14 manifest when available, computes forward returns from
 `close`, builds a simple long/short factor return series, and computes Pearson
-IC by trading date. It deliberately does not compute RankIC, Sharpe, or drawdown
-yet; those are Week 3 follow-up tasks.
+IC and Spearman RankIC by trading date. It deliberately does not compute
+Sharpe or drawdown yet; those are Week 3 follow-up tasks.
 
 ```python
 from agents.backtest_agent import BacktestAgent
@@ -496,6 +497,8 @@ print(response.output["preview"])
 print(response.output["backtest_stats"])
 print(response.output["ic_series_preview"])
 print(response.output["ic_stats"])
+print(response.output["rank_ic_series_preview"])
+print(response.output["rank_ic_stats"])
 ```
 
 For a single-factor matrix, `factor_column` can be omitted. For multi-factor
@@ -505,7 +508,8 @@ reproducible.
 IC output uses `ic` as the direction-adjusted Pearson correlation and `raw_ic`
 as the unadjusted Pearson correlation. For `factor_direction = "negative"`,
 `ic = -raw_ic`, so higher `ic` remains better under the declared signal
-direction.
+direction. RankIC follows the same direction-adjusted convention with
+`rank_ic` and `raw_rank_ic`, using average ranks for ties.
 
 ## Configuration
 
@@ -546,9 +550,9 @@ Week 1:
 - Day 14: generated factor matrix persistence
 - Day 15: BacktestAgent long/short return series
 - Day 16: Pearson IC calculation
+- Day 17: Spearman RankIC calculation
 
-Next steps cover RankIC, Sharpe, drawdown, result JSON, memory, reporting, and
-dashboard.
+Next steps cover Sharpe, drawdown, result JSON, memory, reporting, and dashboard.
 
 ## Engineering Principles
 

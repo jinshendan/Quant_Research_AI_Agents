@@ -11,6 +11,7 @@ from agents.backtest_agent import (
     BacktestAgent,
     BacktestSpec,
     compute_information_coefficient,
+    compute_rank_information_coefficient,
     normalize_aligned_prices,
     normalize_factor_matrix,
 )
@@ -166,11 +167,14 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.output["portfolio_date_count"] == 2
     assert response.output["usable_row_count"] == 12
     assert response.output["ic_date_count"] == 2
+    assert response.output["rank_ic_date_count"] == 2
     assert response.metadata["agent"] == "BacktestAgent"
     assert response.metadata["task_id"] == "backtest-task-1"
     assert response.metadata["portfolio_date_count"] == 2
     assert response.metadata["ic_date_count"] == 2
+    assert response.metadata["rank_ic_date_count"] == 2
     assert response.metadata["mean_ic"] > 0.99
+    assert response.metadata["mean_rank_ic"] == pytest.approx(1.0)
 
     preview = response.output["preview"]
     assert preview[0]["date"] == "2024-01-01"
@@ -195,8 +199,18 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.output["ic_stats"]["ic_date_count"] == 2
     assert response.output["ic_stats"]["mean_ic"] > 0.99
     assert response.output["ic_stats"]["positive_ic_ratio"] == 1.0
+    rank_ic_preview = response.output["rank_ic_series_preview"]
+    assert rank_ic_preview[0]["date"] == "2024-01-01"
+    assert rank_ic_preview[0]["rank_ic"] == pytest.approx(1.0)
+    assert rank_ic_preview[0]["raw_rank_ic"] == pytest.approx(1.0)
+    assert rank_ic_preview[0]["pair_count"] == 6
+    assert response.output["rank_ic_stats"]["method"] == "spearman"
+    assert response.output["rank_ic_stats"]["rank_ic_date_count"] == 2
+    assert response.output["rank_ic_stats"]["mean_rank_ic"] == pytest.approx(1.0)
+    assert response.output["rank_ic_stats"]["positive_rank_ic_ratio"] == 1.0
     assert "BacktestAgent | build_backtest | success" in stream.getvalue()
     assert "BacktestAgent | compute_ic | success" in stream.getvalue()
+    assert "BacktestAgent | compute_rank_ic | success" in stream.getvalue()
 
 
 def test_backtest_agent_uses_single_factor_without_explicit_column(
@@ -305,5 +319,73 @@ def test_compute_information_coefficient_skips_undefined_dates() -> None:
         "mean_ic": None,
         "std_ic": None,
         "positive_ic_ratio": None,
+        "average_pair_count": 0.0,
+    }
+
+
+def test_compute_rank_information_coefficient_handles_ties() -> None:
+    panel = pd.DataFrame(
+        {
+            "date": ["2024-01-01"] * 5,
+            "factor__alpha": [1.0, 1.0, 2.0, 3.0, 3.0],
+            "forward_return": [0.01, 0.02, 0.03, 0.05, 0.04],
+        }
+    )
+
+    result = compute_rank_information_coefficient(
+        panel,
+        factor_column="factor__alpha",
+    )
+
+    assert result.data["rank_ic"].iloc[0] == pytest.approx(0.9486832980505138)
+    assert result.data["raw_rank_ic"].iloc[0] == pytest.approx(0.9486832980505138)
+    assert result.data["pair_count"].iloc[0] == 5
+    assert result.stats["method"] == "spearman"
+    assert result.stats["mean_rank_ic"] == pytest.approx(0.9486832980505138)
+
+
+def test_compute_rank_information_coefficient_adjusts_negative_direction() -> None:
+    panel = pd.DataFrame(
+        {
+            "date": ["2024-01-01", "2024-01-01", "2024-01-01"],
+            "factor__negative": [3.0, 2.0, 1.0],
+            "forward_return": [0.01, 0.02, 0.03],
+        }
+    )
+
+    result = compute_rank_information_coefficient(
+        panel,
+        factor_column="factor__negative",
+        factor_direction="negative",
+    )
+
+    assert result.data["raw_rank_ic"].iloc[0] == pytest.approx(-1.0)
+    assert result.data["rank_ic"].iloc[0] == pytest.approx(1.0)
+    assert result.stats["mean_rank_ic"] == pytest.approx(1.0)
+    assert result.stats["positive_rank_ic_ratio"] == 1.0
+
+
+def test_compute_rank_information_coefficient_skips_undefined_dates() -> None:
+    panel = pd.DataFrame(
+        {
+            "date": ["2024-01-01", "2024-01-01", "2024-01-02"],
+            "factor__constant": [1.0, 1.0, 2.0],
+            "forward_return": [0.01, 0.02, 0.03],
+        }
+    )
+
+    result = compute_rank_information_coefficient(
+        panel,
+        factor_column="factor__constant",
+    )
+
+    assert result.data.empty
+    assert result.stats == {
+        "method": "spearman",
+        "rank_ic_date_count": 0,
+        "skipped_date_count": 2,
+        "mean_rank_ic": None,
+        "std_rank_ic": None,
+        "positive_rank_ic_ratio": None,
         "average_pair_count": 0.0,
     }

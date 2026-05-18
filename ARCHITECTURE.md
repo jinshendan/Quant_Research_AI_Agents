@@ -724,6 +724,38 @@ ic_stats
 RankIC, Sharpe, drawdown, or final result JSON. Those remain scoped to Days
 17-20.
 
+## Day 17 --- Rank Information Coefficient
+
+Implemented in `quant-agent/`:
+
+-   `RankInformationCoefficientResult` result model in
+    `quant-agent/agents/backtest_agent.py`
+-   `compute_rank_information_coefficient(...)` for cross-sectional Spearman
+    RankIC by trading date
+-   integration into `BacktestAgent.run(...)` after the Day 16 IC calculation
+-   RankIC output preview with `date`, `rank_ic`, `raw_rank_ic`, and
+    `pair_count`
+-   RankIC summary statistics: mean RankIC, RankIC standard deviation,
+    positive RankIC ratio, average pair count, RankIC date count, and skipped
+    date count
+-   average-rank tie handling through pandas rank semantics
+-   direction adjustment through `payload.factor_direction`; negative-direction
+    factors keep `raw_rank_ic` and report `rank_ic = -raw_rank_ic`
+-   tests for RankIC with ties, negative-direction adjustment, skipped undefined
+    RankIC dates, and BacktestAgent response integration
+
+Current RankIC output fields:
+
+```text
+rank_ic_series_columns
+rank_ic_series_preview
+rank_ic_stats
+```
+
+`rank_ic_stats.method` is currently `spearman`. Day 17 intentionally does not
+compute Sharpe, drawdown, or final result JSON. Those remain scoped to Days
+18-20.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

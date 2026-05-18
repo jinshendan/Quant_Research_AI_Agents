@@ -31,6 +31,7 @@ PORTFOLIO_COLUMNS = (
     "short_count",
 )
 IC_COLUMNS = ("date", "ic", "raw_ic", "pair_count")
+RANK_IC_COLUMNS = ("date", "rank_ic", "raw_rank_ic", "pair_count")
 DEFAULT_FORWARD_RETURN_DAYS = 1
 DEFAULT_PREVIEW_ROWS = 5
 MAX_PREVIEW_ROWS = 50
@@ -126,6 +127,14 @@ class PortfolioBuildResult:
 @dataclass(frozen=True, slots=True)
 class InformationCoefficientResult:
     """Cross-sectional Pearson IC series and summary statistics."""
+
+    data: pd.DataFrame
+    stats: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class RankInformationCoefficientResult:
+    """Cross-sectional Spearman RankIC series and summary statistics."""
 
     data: pd.DataFrame
     stats: dict[str, Any]
@@ -245,6 +254,41 @@ class BacktestAgent:
             "Computed information coefficient.",
             extra={"action": "compute_ic", "status": "success"},
         )
+        self.logger.info(
+            "Computing rank information coefficient.",
+            extra={"action": "compute_rank_ic", "status": "running"},
+        )
+        try:
+            rank_ic_result = compute_rank_information_coefficient(
+                result.panel,
+                factor_column=result.factor_column,
+                factor_direction=spec.factor_direction,
+            )
+        except ValueError as exc:
+            elapsed = perf_counter() - started_at
+            self.logger.warning(
+                "Rank information coefficient calculation failed.",
+                extra={"action": "compute_rank_ic", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    factor_matrix_path=result.factor_matrix_path,
+                    aligned_data_path=result.aligned_data_path,
+                    factor_column=result.factor_column,
+                    portfolio_date_count=len(result.portfolio_returns),
+                    usable_row_count=result.stats["usable_row_count"],
+                    ic_date_count=ic_result.stats["ic_date_count"],
+                    mean_ic=ic_result.stats["mean_ic"],
+                ),
+            )
+        elapsed = perf_counter() - started_at
+        self.logger.info(
+            "Computed rank information coefficient.",
+            extra={"action": "compute_rank_ic", "status": "success"},
+        )
         return AgentResponse.success(
             output={
                 "state": "backtest_built",
@@ -257,10 +301,12 @@ class BacktestAgent:
                 "quantile_count": spec.quantile_count,
                 "portfolio_return_columns": list(PORTFOLIO_COLUMNS),
                 "ic_series_columns": list(IC_COLUMNS),
+                "rank_ic_series_columns": list(RANK_IC_COLUMNS),
                 "row_count": len(result.panel),
                 "usable_row_count": result.stats["usable_row_count"],
                 "portfolio_date_count": len(result.portfolio_returns),
                 "ic_date_count": ic_result.stats["ic_date_count"],
+                "rank_ic_date_count": rank_ic_result.stats["rank_ic_date_count"],
                 "preview": _preview_records(
                     result.portfolio_returns,
                     spec.preview_rows,
@@ -269,9 +315,14 @@ class BacktestAgent:
                     ic_result.data,
                     spec.preview_rows,
                 ),
+                "rank_ic_series_preview": _preview_records(
+                    rank_ic_result.data,
+                    spec.preview_rows,
+                ),
                 "backtest_stats": result.stats,
                 "ic_stats": ic_result.stats,
-                "next_action": "Compute RankIC in Day 17.",
+                "rank_ic_stats": rank_ic_result.stats,
+                "next_action": "Compute Sharpe in Day 18.",
             },
             metadata=self._metadata(
                 request,
@@ -283,6 +334,8 @@ class BacktestAgent:
                 usable_row_count=result.stats["usable_row_count"],
                 ic_date_count=ic_result.stats["ic_date_count"],
                 mean_ic=ic_result.stats["mean_ic"],
+                rank_ic_date_count=rank_ic_result.stats["rank_ic_date_count"],
+                mean_rank_ic=rank_ic_result.stats["mean_rank_ic"],
             ),
         )
 
@@ -369,6 +422,8 @@ class BacktestAgent:
         usable_row_count: int | None = None,
         ic_date_count: int | None = None,
         mean_ic: float | None = None,
+        rank_ic_date_count: int | None = None,
+        mean_rank_ic: float | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -389,6 +444,10 @@ class BacktestAgent:
             metadata["ic_date_count"] = ic_date_count
         if mean_ic is not None:
             metadata["mean_ic"] = mean_ic
+        if rank_ic_date_count is not None:
+            metadata["rank_ic_date_count"] = rank_ic_date_count
+        if mean_rank_ic is not None:
+            metadata["mean_rank_ic"] = mean_rank_ic
         return metadata
 
 
@@ -650,6 +709,96 @@ def _ic_stats(ic_series: pd.DataFrame, skipped_date_count: int) -> dict[str, Any
         "std_ic": std_ic,
         "positive_ic_ratio": float((ic_series["ic"] > 0).mean()),
         "average_pair_count": float(ic_series["pair_count"].mean()),
+    }
+
+
+def compute_rank_information_coefficient(
+    panel: pd.DataFrame,
+    *,
+    factor_column: str,
+    factor_direction: FactorDirection = "positive",
+) -> RankInformationCoefficientResult:
+    """Compute cross-sectional Spearman RankIC by trading date."""
+
+    if factor_direction not in SUPPORTED_FACTOR_DIRECTIONS:
+        msg = "factor_direction must be either positive or negative."
+        raise ValueError(msg)
+    missing_columns = [
+        column
+        for column in ("date", factor_column, FORWARD_RETURN_COLUMN)
+        if column not in panel.columns
+    ]
+    if missing_columns:
+        msg = f"RankIC panel is missing required columns: {', '.join(missing_columns)}."
+        raise ValueError(msg)
+
+    rows: list[dict[str, Any]] = []
+    skipped_date_count = 0
+    direction_multiplier = -1.0 if factor_direction == "negative" else 1.0
+
+    for trade_date, group in panel.groupby("date", sort=True):
+        usable = group[[factor_column, FORWARD_RETURN_COLUMN]].dropna()
+        if len(usable) < 2:
+            skipped_date_count += 1
+            continue
+        if (
+            usable[factor_column].nunique(dropna=True) < 2
+            or usable[FORWARD_RETURN_COLUMN].nunique(dropna=True) < 2
+        ):
+            skipped_date_count += 1
+            continue
+
+        factor_rank = usable[factor_column].rank(method="average")
+        return_rank = usable[FORWARD_RETURN_COLUMN].rank(method="average")
+        raw_rank_ic = factor_rank.corr(return_rank)
+        if pd.isna(raw_rank_ic):
+            skipped_date_count += 1
+            continue
+        raw_rank_ic_float = float(raw_rank_ic)
+        rows.append(
+            {
+                "date": trade_date,
+                "rank_ic": direction_multiplier * raw_rank_ic_float,
+                "raw_rank_ic": raw_rank_ic_float,
+                "pair_count": int(len(usable)),
+            }
+        )
+
+    rank_ic_series = pd.DataFrame(rows, columns=RANK_IC_COLUMNS)
+    if not rank_ic_series.empty:
+        rank_ic_series = rank_ic_series.sort_values("date").reset_index(drop=True)
+    return RankInformationCoefficientResult(
+        data=rank_ic_series,
+        stats=_rank_ic_stats(rank_ic_series, skipped_date_count),
+    )
+
+
+def _rank_ic_stats(
+    rank_ic_series: pd.DataFrame,
+    skipped_date_count: int,
+) -> dict[str, Any]:
+    if rank_ic_series.empty:
+        return {
+            "method": "spearman",
+            "rank_ic_date_count": 0,
+            "skipped_date_count": skipped_date_count,
+            "mean_rank_ic": None,
+            "std_rank_ic": None,
+            "positive_rank_ic_ratio": None,
+            "average_pair_count": 0.0,
+        }
+
+    mean_rank_ic = float(rank_ic_series["rank_ic"].mean())
+    std_rank_ic_raw = rank_ic_series["rank_ic"].std()
+    std_rank_ic = None if pd.isna(std_rank_ic_raw) else float(std_rank_ic_raw)
+    return {
+        "method": "spearman",
+        "rank_ic_date_count": len(rank_ic_series),
+        "skipped_date_count": skipped_date_count,
+        "mean_rank_ic": mean_rank_ic,
+        "std_rank_ic": std_rank_ic,
+        "positive_rank_ic_ratio": float((rank_ic_series["rank_ic"] > 0).mean()),
+        "average_pair_count": float(rank_ic_series["pair_count"].mean()),
     }
 
 
