@@ -68,6 +68,9 @@ class AppConfig:
             self.cache_dir,
             self.duckdb_path.parent,
             self.factors_dir,
+            self.factors_dir / "generated",
+            self.factors_dir / "validated",
+            self.factors_dir / "rejected",
             self.memory_dir,
         )
         for directory in directories:

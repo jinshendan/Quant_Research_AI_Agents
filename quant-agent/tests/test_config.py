@@ -48,4 +48,7 @@ def test_config_ensure_directories(tmp_path: Path) -> None:
     assert config.cache_dir.is_dir()
     assert config.duckdb_path.parent.is_dir()
     assert config.factors_dir.is_dir()
+    assert (config.factors_dir / "generated").is_dir()
+    assert (config.factors_dir / "validated").is_dir()
+    assert (config.factors_dir / "rejected").is_dir()
     assert config.memory_dir.is_dir()

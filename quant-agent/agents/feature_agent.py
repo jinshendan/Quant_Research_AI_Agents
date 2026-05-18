@@ -14,6 +14,12 @@ from agents.factor_rolling import (
     apply_rolling_features,
     normalize_rolling_windows,
 )
+from agents.factor_store import (
+    DEFAULT_FACTOR_SET_NAME,
+    FactorMatrixStore,
+    FactorStorageContext,
+    FactorStorageResult,
+)
 from agents.factor_templates import FactorTemplate, FactorTemplateLibrary
 from agents.factor_transforms import (
     DEFAULT_QUANTILE_COUNT,
@@ -21,6 +27,7 @@ from agents.factor_transforms import (
     apply_rank_transforms,
     validate_quantile_count,
 )
+from core.config import AppConfig
 from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
 
@@ -43,6 +50,8 @@ class FeatureSpec:
     rank_transforms: tuple[str, ...] = ()
     quantile_count: int = DEFAULT_QUANTILE_COUNT
     preview_rows: int = DEFAULT_PREVIEW_ROWS
+    save_factors: bool = False
+    factor_set_name: str = DEFAULT_FACTOR_SET_NAME
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> FeatureSpec:
@@ -72,6 +81,12 @@ class FeatureSpec:
             minimum=0,
             maximum=MAX_PREVIEW_ROWS,
         )
+        save_factors = _optional_bool(payload, "save_factors", False)
+        factor_set_name = _optional_str(
+            payload,
+            "factor_set_name",
+            DEFAULT_FACTOR_SET_NAME,
+        )
         return cls(
             aligned_data_path=aligned_data_path,
             template_ids=template_ids,
@@ -80,6 +95,8 @@ class FeatureSpec:
             rank_transforms=rank_transforms,
             quantile_count=quantile_count,
             preview_rows=preview_rows,
+            save_factors=save_factors,
+            factor_set_name=factor_set_name,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -91,6 +108,8 @@ class FeatureSpec:
             "rank_transforms": list(self.rank_transforms),
             "quantile_count": self.quantile_count,
             "preview_rows": self.preview_rows,
+            "save_factors": self.save_factors,
+            "factor_set_name": self.factor_set_name,
         }
 
 
@@ -116,10 +135,16 @@ class FeatureAgent:
     def __init__(
         self,
         *,
+        config: AppConfig | None = None,
         logger: AgentLoggerAdapter | None = None,
+        factor_store: FactorMatrixStore | None = None,
         template_library: FactorTemplateLibrary | None = None,
     ) -> None:
+        self.config = config or AppConfig.from_env()
         self.logger = logger or get_agent_logger(self.name)
+        self.factor_store = factor_store or FactorMatrixStore(
+            self.config.factors_dir / "generated"
+        )
         self.template_library = template_library or FactorTemplateLibrary()
 
     def run(self, request: AgentRequest) -> AgentResponse:
@@ -179,9 +204,57 @@ class FeatureAgent:
             extra={"action": "generate_features", "status": "success"},
         )
         template_ids = [template.template_id for template in templates]
+        storage_result: FactorStorageResult | None = None
+        if spec.save_factors:
+            self.logger.info(
+                "Saving generated factor matrix.",
+                extra={"action": "save_factors", "status": "running"},
+            )
+            try:
+                self.config.ensure_directories()
+                storage_result = self.factor_store.store(
+                    factor_data=result.data,
+                    factor_columns=result.factor_columns,
+                    context=FactorStorageContext(
+                        task_id=request.task_id,
+                        factor_set_name=spec.factor_set_name,
+                        source_aligned_data_path=str(spec.aligned_data_path),
+                        template_ids=tuple(template_ids),
+                        base_factor_columns=result.base_factor_columns,
+                        rolling_feature_columns=result.rolling_feature_columns,
+                        transformed_factor_columns=result.transformed_factor_columns,
+                        feature_stats=result.stats,
+                        rolling_feature_stats=result.rolling_feature_stats or {},
+                        rank_transform_stats=result.rank_transform_stats or {},
+                    ),
+                )
+            except (OSError, ValueError) as exc:
+                elapsed = perf_counter() - started_at
+                self.logger.warning(
+                    "Saving generated factor matrix failed.",
+                    extra={"action": "save_factors", "status": "error"},
+                )
+                return AgentResponse.failure(
+                    str(exc),
+                    metadata=self._metadata(
+                        request,
+                        elapsed,
+                        aligned_data_path=spec.aligned_data_path,
+                        row_count=len(result.data),
+                        factor_count=len(result.factor_columns),
+                        template_count=len(templates),
+                        template_ids=template_ids,
+                    ),
+                )
+            self.logger.info(
+                "Saved generated factor matrix.",
+                extra={"action": "save_factors", "status": "success"},
+            )
+        elapsed = perf_counter() - started_at
+        storage_stats = storage_result.to_dict() if storage_result else {}
         return AgentResponse.success(
             output={
-                "state": "features_generated",
+                "state": "features_saved" if storage_result else "features_generated",
                 "request": spec.to_dict(),
                 "template_ids": template_ids,
                 "factor_columns": list(result.factor_columns),
@@ -197,7 +270,10 @@ class FeatureAgent:
                 "feature_stats": result.stats,
                 "rolling_feature_stats": result.rolling_feature_stats or {},
                 "rank_transform_stats": result.rank_transform_stats or {},
-                "next_action": "Save generated factors in Day 14.",
+                "save_factors": spec.save_factors,
+                "factor_set_name": spec.factor_set_name,
+                "storage_stats": storage_stats,
+                "next_action": "Build BacktestAgent in Day 15.",
             },
             metadata=self._metadata(
                 request,
@@ -207,6 +283,7 @@ class FeatureAgent:
                 factor_count=len(result.factor_columns),
                 template_count=len(templates),
                 template_ids=template_ids,
+                storage_stats=storage_stats,
             ),
         )
 
@@ -301,6 +378,7 @@ class FeatureAgent:
         factor_count: int | None = None,
         template_count: int | None = None,
         template_ids: Sequence[str] | None = None,
+        storage_stats: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -317,6 +395,8 @@ class FeatureAgent:
             metadata["template_count"] = template_count
         if template_ids is not None:
             metadata["template_ids"] = list(template_ids)
+        if storage_stats is not None:
+            metadata["storage_stats"] = dict(storage_stats)
         return metadata
 
 
@@ -634,3 +714,19 @@ def _optional_int(
         msg = f"payload.{key} must be between {minimum} and {maximum}."
         raise ValueError(msg)
     return value
+
+
+def _optional_bool(payload: Mapping[str, Any], key: str, default: bool) -> bool:
+    value = payload.get(key, default)
+    if not isinstance(value, bool):
+        msg = f"payload.{key} must be a boolean."
+        raise ValueError(msg)
+    return value
+
+
+def _optional_str(payload: Mapping[str, Any], key: str, default: str) -> str:
+    value = payload.get(key, default)
+    if not isinstance(value, str) or not value.strip():
+        msg = f"payload.{key} must be a non-empty string."
+        raise ValueError(msg)
+    return value.strip()

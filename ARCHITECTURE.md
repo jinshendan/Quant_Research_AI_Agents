@@ -587,9 +587,58 @@ max
 zscore
 ```
 
-Day 13 computes rolling-window features in memory only. It does not persist
-factor matrices or evaluate performance. Factor persistence remains scoped to
-Day 14.
+Day 13 computes rolling-window features in memory only. Factor persistence is
+implemented on Day 14.
+
+## Day 14 --- Generated Factor Persistence
+
+Implemented in `quant-agent/`:
+
+-   file-backed factor matrix storage in `quant-agent/agents/factor_store.py`
+-   `FactorMatrixStore` interface for writing generated factor matrices and
+    JSON lineage manifests
+-   optional FeatureAgent integration through `payload.save_factors`
+-   configurable factor set naming through `payload.factor_set_name`
+-   default storage under `factors/generated/`
+-   `AppConfig.ensure_directories()` creation of `factors/generated`,
+    `factors/validated`, and `factors/rejected`
+-   structured logs for factor matrix save attempts and failures
+-   tests for storage validation, CSV output, manifest output, and FeatureAgent
+    persistence integration
+
+Current FeatureAgent persistence payload fields:
+
+```json
+{
+  "factor_set_name": "csi500_short_horizon",
+  "save_factors": true
+}
+```
+
+Saved factor artifacts:
+
+```text
+factors/generated/{factor_set_name}_{task_id}.csv
+factors/generated/{factor_set_name}_{task_id}.manifest.json
+```
+
+Manifest fields:
+
+```text
+schema_version
+created_at
+storage
+context
+```
+
+`storage` records the matrix path, manifest path, row count, factor count,
+factor columns, and storage format. `context` records the source aligned data
+path, template ids, base factor columns, rolling feature columns, transformed
+factor columns, and quality statistics.
+
+Day 14 deliberately uses CSV plus a small JSON manifest instead of introducing
+a factor database table yet. Week 3 BacktestAgent can now depend on a durable,
+lineage-tracked factor matrix without coupling itself to FeatureAgent internals.
 
 ------------------------------------------------------------------------
 

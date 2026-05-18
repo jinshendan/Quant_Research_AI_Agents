@@ -15,6 +15,11 @@ from agents.factor_rolling import (
     RollingFeatureSpec,
     apply_rolling_features,
 )
+from agents.factor_store import (
+    FactorMatrixStore,
+    FactorStorageContext,
+    FactorStorageResult,
+)
 from agents.factor_transforms import (
     RankTransformResult,
     RankTransformSpec,
@@ -64,6 +69,9 @@ __all__ = [
     "FactorFamily",
     "FactorGenerationAgent",
     "FactorGenerationSpec",
+    "FactorMatrixStore",
+    "FactorStorageContext",
+    "FactorStorageResult",
     "FactorTemplate",
     "FactorTemplateLibrary",
     "FeatureAgent",

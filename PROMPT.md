@@ -468,3 +468,21 @@ Priority:
 
 Working system first
 Perfect architecture later.
+
+---
+
+# Current Incremental Status
+
+Implemented through Day 14:
+
+- DataAgent ingestion, cleaning, trading-calendar alignment, DuckDB storage, and cache
+- HypothesisAgent deterministic alpha hypothesis generation
+- factor template library and first 50 symbolic candidate factors
+- FeatureAgent factor computation with ranking and rolling-window transforms
+- generated factor matrix persistence under `factors/generated/` with JSON lineage manifests
+
+Next implementation focus:
+
+Day 15 BacktestAgent should consume a saved factor matrix and produce the first
+backtest-oriented agent output without adding evaluation metrics that belong to
+later Week 3 tasks.

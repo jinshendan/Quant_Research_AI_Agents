@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-13：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms 和 rolling-window features。
+> 当前项目处于早期搭建阶段。已完成 Day 1-14：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features 和 generated factor matrix 持久化。
 
 ## Why This Project
 
@@ -59,11 +59,11 @@ Implemented:
 - `FactorGenerationAgent` for generating the first deterministic 50 symbolic factors
 - cross-sectional ranking transforms for factor matrices
 - per-symbol rolling-window feature transforms for factor matrices
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, and rolling-window features
+- file-backed factor matrix persistence with lineage manifests
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, and factor matrix persistence
 
 Not implemented yet:
 
-- factor persistence
 - backtesting
 - memory and report generation
 - Streamlit dashboard
@@ -83,6 +83,7 @@ Not implemented yet:
     │   ├── duckdb_store.py
     │   ├── factor_generator.py
     │   ├── factor_rolling.py
+    │   ├── factor_store.py
     │   ├── factor_templates.py
     │   ├── factor_transforms.py
     │   ├── feature_agent.py
@@ -370,8 +371,8 @@ breakout, price-action, and risk-adjusted momentum signals.
 
 `FeatureAgent` computes selected factor templates against an aligned OHLCV CSV.
 It keeps `symbol` and `date`, masks suspended or missing rows, and returns a
-small preview plus quality statistics. Saving full factor matrices is deferred
-to Day 14.
+small preview plus quality statistics. It can optionally persist the full
+factor matrix and a lineage manifest under `factors/generated/`.
 
 ```python
 from agents.feature_agent import FeatureAgent
@@ -392,6 +393,30 @@ print(response.output["feature_stats"])
 
 If `template_ids` is omitted, FeatureAgent computes all currently supported
 default templates.
+
+Persist a generated factor matrix by setting `save_factors`:
+
+```python
+request = AgentRequest.create(
+    {
+        "aligned_data_path": "data/processed/aligned_ohlcv_akshare_CSI500_daily_none_20200101_20251231.csv",
+        "template_ids": ["return_5d"],
+        "rolling_features": ["mean", "zscore"],
+        "rolling_windows": [5, 20],
+        "rank_transforms": ["rank_pct"],
+        "factor_set_name": "csi500_short_horizon",
+        "save_factors": True,
+    }
+)
+
+response = FeatureAgent().run(request)
+print(response.output["storage_stats"]["matrix_path"])
+print(response.output["storage_stats"]["manifest_path"])
+```
+
+Saved manifests record the source aligned dataset, template ids, generated
+factor columns, transform columns, row counts, and quality statistics so Week 3
+backtests can consume a reproducible factor matrix.
 
 FeatureAgent can also append cross-sectional ranking transforms by date:
 
@@ -423,7 +448,7 @@ request = AgentRequest.create(
 
 `FactorGenerationAgent` creates the first deterministic batch of symbolic
 candidate factors. It generates factor definitions only; ranking transforms,
-durable storage, and performance evaluation remain separate later steps.
+feature computation, and performance evaluation remain separate agent steps.
 
 ```python
 from agents.factor_generator import FactorGenerationAgent
@@ -476,9 +501,9 @@ Week 1:
 - Day 11: first 50 symbolic candidate factors
 - Day 12: cross-sectional ranking transforms
 - Day 13: per-symbol rolling-window features
+- Day 14: generated factor matrix persistence
 
-Next steps cover factor persistence, backtesting, evaluation, memory, reporting,
-and dashboard.
+Next steps cover backtesting, evaluation, memory, reporting, and dashboard.
 
 ## Engineering Principles
 

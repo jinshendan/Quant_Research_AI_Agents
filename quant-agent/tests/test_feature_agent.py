@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import StringIO
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 
 from agents.factor_templates import FactorTemplate, FactorTemplateLibrary
 from agents.feature_agent import FeatureAgent, FeatureSpec, normalize_aligned_ohlcv
+from core.config import AppConfig
 from core.logging import configure_logging, get_agent_logger
 from core.models import AgentRequest
 
@@ -42,6 +44,10 @@ def _write_aligned_csv(tmp_path: Path, *, days: int = 6) -> Path:
     return path
 
 
+def _config(tmp_path: Path) -> AppConfig:
+    return AppConfig.from_env(project_root=tmp_path, environ={})
+
+
 def test_feature_spec_normalizes_valid_payload(tmp_path: Path) -> None:
     path = _write_aligned_csv(tmp_path)
 
@@ -61,6 +67,8 @@ def test_feature_spec_normalizes_valid_payload(tmp_path: Path) -> None:
         "rank_transforms": [],
         "quantile_count": 5,
         "preview_rows": 3,
+        "save_factors": False,
+        "factor_set_name": "generated_factors",
     }
 
 
@@ -69,6 +77,13 @@ def test_feature_spec_rejects_bad_preview_rows(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="preview_rows"):
         FeatureSpec.from_payload({"aligned_data_path": str(path), "preview_rows": 99})
+
+
+def test_feature_spec_rejects_bad_save_flag(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path)
+
+    with pytest.raises(ValueError, match="save_factors"):
+        FeatureSpec.from_payload({"aligned_data_path": str(path), "save_factors": "yes"})
 
 
 def test_normalize_aligned_ohlcv_rejects_missing_identity_columns() -> None:
@@ -110,6 +125,7 @@ def test_feature_agent_generates_selected_factor_values(tmp_path: Path) -> None:
     assert response.output["transformed_factor_columns"] == []
     assert response.output["rolling_feature_stats"] == {}
     assert response.output["rank_transform_stats"] == {}
+    assert response.output["storage_stats"] == {}
     assert len(response.output["preview"]) == 4
     assert response.metadata["agent"] == "FeatureAgent"
     assert response.metadata["task_id"] == "feature-task-1"
@@ -121,6 +137,67 @@ def test_feature_agent_generates_selected_factor_values(tmp_path: Path) -> None:
     assert stats["factor__return_3d"]["valid_values"] == 5
     assert stats["factor__close_to_open_return"]["valid_values"] == 11
     assert stats["factor__close_position_in_range"]["valid_values"] == 11
+
+
+def test_feature_agent_saves_factor_matrix_when_requested(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path)
+    stream = StringIO()
+    configure_logging(stream=stream)
+    agent = FeatureAgent(
+        config=_config(tmp_path),
+        logger=get_agent_logger("FeatureAgent"),
+    )
+    request = AgentRequest.create(
+        {
+            "aligned_data_path": str(path),
+            "template_ids": ["close_to_open_return"],
+            "rolling_features": ["mean"],
+            "rolling_windows": [3],
+            "rank_transforms": ["rank_pct"],
+            "factor_set_name": "demo set",
+            "save_factors": True,
+            "preview_rows": 0,
+        },
+        task_id="feature-save-1",
+    )
+
+    response = agent.run(request)
+
+    assert response.status == "success"
+    assert response.output["state"] == "features_saved"
+    assert response.output["preview"] == []
+    assert response.output["save_factors"] is True
+    assert response.output["factor_set_name"] == "demo set"
+    assert response.output["storage_stats"]["factor_set_name"] == "demo_set"
+    assert response.output["storage_stats"]["rows_written"] == 12
+    assert response.output["storage_stats"]["factor_count"] == 4
+    assert response.metadata["storage_stats"] == response.output["storage_stats"]
+
+    matrix_path = Path(response.output["storage_stats"]["matrix_path"])
+    manifest_path = Path(response.output["storage_stats"]["manifest_path"])
+    assert matrix_path.is_file()
+    assert manifest_path.is_file()
+    assert matrix_path.parent == tmp_path / "factors" / "generated"
+
+    matrix = pd.read_csv(matrix_path, dtype={"symbol": str})
+    assert matrix.columns.tolist() == [
+        "date",
+        "symbol",
+        "factor__close_to_open_return",
+        "factor__close_to_open_return__roll_mean_3",
+        "factor__close_to_open_return__rank_pct",
+        "factor__close_to_open_return__roll_mean_3__rank_pct",
+    ]
+    assert len(matrix) == 12
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["context"]["task_id"] == "feature-save-1"
+    assert manifest["context"]["factor_set_name"] == "demo set"
+    assert manifest["context"]["base_factor_columns"] == [
+        "factor__close_to_open_return"
+    ]
+    assert manifest["storage"]["matrix_path"] == str(matrix_path)
+    assert "FeatureAgent | save_factors | success" in stream.getvalue()
 
 
 def test_feature_agent_generate_features_preserves_expected_values() -> None:
