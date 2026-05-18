@@ -12,6 +12,7 @@ from agents.backtest_agent import (
     BacktestSpec,
     compute_information_coefficient,
     compute_rank_information_coefficient,
+    compute_sharpe_ratio,
     normalize_aligned_prices,
     normalize_factor_matrix,
 )
@@ -115,6 +116,7 @@ def test_backtest_spec_accepts_manifest_only(tmp_path: Path) -> None:
     assert spec.factor_column == "factor__alpha"
     assert spec.forward_return_days == 2
     assert spec.quantile_count == 3
+    assert spec.annualization_factor == 252
     assert spec.preview_rows == 0
 
 
@@ -164,6 +166,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.output["factor_matrix_path"] == str(factor_matrix_path.resolve())
     assert response.output["aligned_data_path"] == str(aligned_path.resolve())
     assert response.output["factor_column"] == "factor__alpha"
+    assert response.output["annualization_factor"] == 252
     assert response.output["portfolio_date_count"] == 2
     assert response.output["usable_row_count"] == 12
     assert response.output["ic_date_count"] == 2
@@ -175,6 +178,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.metadata["rank_ic_date_count"] == 2
     assert response.metadata["mean_ic"] > 0.99
     assert response.metadata["mean_rank_ic"] == pytest.approx(1.0)
+    assert response.metadata["sharpe"] == pytest.approx(33.67491648096547)
 
     preview = response.output["preview"]
     assert preview[0]["date"] == "2024-01-01"
@@ -208,9 +212,22 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.output["rank_ic_stats"]["rank_ic_date_count"] == 2
     assert response.output["rank_ic_stats"]["mean_rank_ic"] == pytest.approx(1.0)
     assert response.output["rank_ic_stats"]["positive_rank_ic_ratio"] == 1.0
+    assert response.output["sharpe_stats"]["method"] == "mean_std"
+    assert response.output["sharpe_stats"]["return_column"] == "long_short_return"
+    assert response.output["sharpe_stats"]["return_count"] == 2
+    assert response.output["sharpe_stats"]["mean_period_return"] == pytest.approx(0.075)
+    assert response.output["sharpe_stats"]["std_period_return"] == pytest.approx(
+        0.03535533905932738
+    )
+    assert response.output["sharpe_stats"]["annualized_mean_return"] == pytest.approx(18.9)
+    assert response.output["sharpe_stats"]["sharpe"] == pytest.approx(
+        33.67491648096547
+    )
+    assert response.output["sharpe_stats"]["positive_return_ratio"] == 1.0
     assert "BacktestAgent | build_backtest | success" in stream.getvalue()
     assert "BacktestAgent | compute_ic | success" in stream.getvalue()
     assert "BacktestAgent | compute_rank_ic | success" in stream.getvalue()
+    assert "BacktestAgent | compute_sharpe | success" in stream.getvalue()
 
 
 def test_backtest_agent_uses_single_factor_without_explicit_column(
@@ -389,3 +406,37 @@ def test_compute_rank_information_coefficient_skips_undefined_dates() -> None:
         "positive_rank_ic_ratio": None,
         "average_pair_count": 0.0,
     }
+
+
+def test_compute_sharpe_ratio_annualizes_long_short_returns() -> None:
+    returns = pd.Series([0.01, 0.02, -0.01])
+    result = compute_sharpe_ratio(
+        pd.DataFrame({"long_short_return": returns}),
+        annualization_factor=12,
+    )
+
+    expected_sharpe = returns.mean() / returns.std() * (12**0.5)
+    assert result.stats["method"] == "mean_std"
+    assert result.stats["annualization_factor"] == 12
+    assert result.stats["return_count"] == 3
+    assert result.stats["mean_period_return"] == pytest.approx(returns.mean())
+    assert result.stats["std_period_return"] == pytest.approx(returns.std())
+    assert result.stats["annualized_mean_return"] == pytest.approx(returns.mean() * 12)
+    assert result.stats["sharpe"] == pytest.approx(expected_sharpe)
+    assert result.stats["positive_return_ratio"] == pytest.approx(2 / 3)
+
+
+def test_compute_sharpe_ratio_returns_none_for_zero_volatility() -> None:
+    result = compute_sharpe_ratio(
+        pd.DataFrame({"long_short_return": [0.01, 0.01, 0.01]})
+    )
+
+    assert result.stats["return_count"] == 3
+    assert result.stats["mean_period_return"] == pytest.approx(0.01)
+    assert result.stats["std_period_return"] == pytest.approx(0.0)
+    assert result.stats["sharpe"] is None
+
+
+def test_compute_sharpe_ratio_rejects_missing_return_column() -> None:
+    with pytest.raises(ValueError, match="long_short_return"):
+        compute_sharpe_ratio(pd.DataFrame({"other_return": [0.01]}))

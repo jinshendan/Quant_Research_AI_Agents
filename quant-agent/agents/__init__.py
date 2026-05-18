@@ -6,8 +6,10 @@ from agents.backtest_agent import (
     BacktestSpec,
     InformationCoefficientResult,
     RankInformationCoefficientResult,
+    SharpeResult,
     compute_information_coefficient,
     compute_rank_information_coefficient,
+    compute_sharpe_ratio,
 )
 from agents.data_agent import DataAgent, MarketDataSpec
 from agents.duckdb_store import (
@@ -108,6 +110,7 @@ __all__ = [
     "RankInformationCoefficientResult",
     "RollingFeatureResult",
     "RollingFeatureSpec",
+    "SharpeResult",
     "TradingCalendarProvider",
     "align_to_trading_calendar",
     "apply_rank_transforms",
@@ -115,4 +118,5 @@ __all__ = [
     "clean_ohlcv",
     "compute_information_coefficient",
     "compute_rank_information_coefficient",
+    "compute_sharpe_ratio",
 ]

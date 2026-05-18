@@ -473,7 +473,7 @@ Perfect architecture later.
 
 # Current Incremental Status
 
-Implemented through Day 17:
+Implemented through Day 18:
 
 - DataAgent ingestion, cleaning, trading-calendar alignment, DuckDB storage, and cache
 - HypothesisAgent deterministic alpha hypothesis generation
@@ -483,8 +483,9 @@ Implemented through Day 17:
 - BacktestAgent construction of long/short factor return series from saved factor matrices
 - Pearson IC calculation by trading date with direction-adjusted IC output
 - Spearman RankIC calculation by trading date with direction-adjusted RankIC output
+- annualized Sharpe calculation from the long/short return series
 
 Next implementation focus:
 
-Day 18 should compute Sharpe from the long/short return series without adding
-drawdown or full result JSON yet.
+Day 19 should compute Drawdown from the long/short return series without adding
+full result JSON yet.

@@ -756,6 +756,35 @@ rank_ic_stats
 compute Sharpe, drawdown, or final result JSON. Those remain scoped to Days
 18-20.
 
+## Day 18 --- Sharpe
+
+Implemented in `quant-agent/`:
+
+-   `SharpeResult` result model in `quant-agent/agents/backtest_agent.py`
+-   `compute_sharpe_ratio(...)` for annualized Sharpe from the long/short
+    return series
+-   optional `payload.annualization_factor`, defaulting to 252 trading periods
+    per year
+-   integration into `BacktestAgent.run(...)` after the Day 17 RankIC
+    calculation
+-   Sharpe summary statistics: return count, mean period return, sample
+    standard deviation, annualized mean return, annualized Sharpe, positive
+    return ratio, return column, and annualization factor
+-   graceful `None` Sharpe when the return series has fewer than two valid
+    observations or zero volatility
+-   tests for annualization, zero-volatility handling, missing return columns,
+    and BacktestAgent response integration
+
+Current Sharpe output field:
+
+```text
+sharpe_stats
+```
+
+`sharpe_stats.method` is currently `mean_std`, using sample standard deviation
+of `long_short_return`. Day 18 intentionally does not compute drawdown or final
+result JSON. Those remain scoped to Days 19-20.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

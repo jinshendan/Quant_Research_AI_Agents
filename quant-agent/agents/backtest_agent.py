@@ -32,10 +32,14 @@ PORTFOLIO_COLUMNS = (
 )
 IC_COLUMNS = ("date", "ic", "raw_ic", "pair_count")
 RANK_IC_COLUMNS = ("date", "rank_ic", "raw_rank_ic", "pair_count")
+SHARPE_RETURN_COLUMN = "long_short_return"
+DEFAULT_ANNUALIZATION_FACTOR = 252
 DEFAULT_FORWARD_RETURN_DAYS = 1
 DEFAULT_PREVIEW_ROWS = 5
 MAX_PREVIEW_ROWS = 50
 MAX_FORWARD_RETURN_DAYS = 60
+MIN_ANNUALIZATION_FACTOR = 1
+MAX_ANNUALIZATION_FACTOR = 366
 SUPPORTED_FACTOR_DIRECTIONS = {"positive", "negative"}
 
 
@@ -50,6 +54,7 @@ class BacktestSpec:
     factor_direction: FactorDirection = "positive"
     forward_return_days: int = DEFAULT_FORWARD_RETURN_DAYS
     quantile_count: int = DEFAULT_QUANTILE_COUNT
+    annualization_factor: int = DEFAULT_ANNUALIZATION_FACTOR
     preview_rows: int = DEFAULT_PREVIEW_ROWS
 
     @classmethod
@@ -79,6 +84,13 @@ class BacktestSpec:
                 maximum=20,
             )
         )
+        annualization_factor = _optional_int(
+            payload,
+            "annualization_factor",
+            DEFAULT_ANNUALIZATION_FACTOR,
+            minimum=MIN_ANNUALIZATION_FACTOR,
+            maximum=MAX_ANNUALIZATION_FACTOR,
+        )
         preview_rows = _optional_int(
             payload,
             "preview_rows",
@@ -94,6 +106,7 @@ class BacktestSpec:
             factor_direction=factor_direction,
             forward_return_days=forward_return_days,
             quantile_count=quantile_count,
+            annualization_factor=annualization_factor,
             preview_rows=preview_rows,
         )
 
@@ -112,6 +125,7 @@ class BacktestSpec:
             "factor_direction": self.factor_direction,
             "forward_return_days": self.forward_return_days,
             "quantile_count": self.quantile_count,
+            "annualization_factor": self.annualization_factor,
             "preview_rows": self.preview_rows,
         }
 
@@ -137,6 +151,13 @@ class RankInformationCoefficientResult:
     """Cross-sectional Spearman RankIC series and summary statistics."""
 
     data: pd.DataFrame
+    stats: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class SharpeResult:
+    """Sharpe ratio and return-distribution statistics."""
+
     stats: dict[str, Any]
 
 
@@ -289,6 +310,42 @@ class BacktestAgent:
             "Computed rank information coefficient.",
             extra={"action": "compute_rank_ic", "status": "success"},
         )
+        self.logger.info(
+            "Computing Sharpe ratio.",
+            extra={"action": "compute_sharpe", "status": "running"},
+        )
+        try:
+            sharpe_result = compute_sharpe_ratio(
+                result.portfolio_returns,
+                annualization_factor=spec.annualization_factor,
+            )
+        except ValueError as exc:
+            elapsed = perf_counter() - started_at
+            self.logger.warning(
+                "Sharpe ratio calculation failed.",
+                extra={"action": "compute_sharpe", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    factor_matrix_path=result.factor_matrix_path,
+                    aligned_data_path=result.aligned_data_path,
+                    factor_column=result.factor_column,
+                    portfolio_date_count=len(result.portfolio_returns),
+                    usable_row_count=result.stats["usable_row_count"],
+                    ic_date_count=ic_result.stats["ic_date_count"],
+                    mean_ic=ic_result.stats["mean_ic"],
+                    rank_ic_date_count=rank_ic_result.stats["rank_ic_date_count"],
+                    mean_rank_ic=rank_ic_result.stats["mean_rank_ic"],
+                ),
+            )
+        elapsed = perf_counter() - started_at
+        self.logger.info(
+            "Computed Sharpe ratio.",
+            extra={"action": "compute_sharpe", "status": "success"},
+        )
         return AgentResponse.success(
             output={
                 "state": "backtest_built",
@@ -299,6 +356,7 @@ class BacktestAgent:
                 "factor_direction": spec.factor_direction,
                 "forward_return_days": spec.forward_return_days,
                 "quantile_count": spec.quantile_count,
+                "annualization_factor": spec.annualization_factor,
                 "portfolio_return_columns": list(PORTFOLIO_COLUMNS),
                 "ic_series_columns": list(IC_COLUMNS),
                 "rank_ic_series_columns": list(RANK_IC_COLUMNS),
@@ -322,7 +380,8 @@ class BacktestAgent:
                 "backtest_stats": result.stats,
                 "ic_stats": ic_result.stats,
                 "rank_ic_stats": rank_ic_result.stats,
-                "next_action": "Compute Sharpe in Day 18.",
+                "sharpe_stats": sharpe_result.stats,
+                "next_action": "Compute Drawdown in Day 19.",
             },
             metadata=self._metadata(
                 request,
@@ -336,6 +395,7 @@ class BacktestAgent:
                 mean_ic=ic_result.stats["mean_ic"],
                 rank_ic_date_count=rank_ic_result.stats["rank_ic_date_count"],
                 mean_rank_ic=rank_ic_result.stats["mean_rank_ic"],
+                sharpe=sharpe_result.stats["sharpe"],
             ),
         )
 
@@ -424,6 +484,7 @@ class BacktestAgent:
         mean_ic: float | None = None,
         rank_ic_date_count: int | None = None,
         mean_rank_ic: float | None = None,
+        sharpe: float | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -448,6 +509,8 @@ class BacktestAgent:
             metadata["rank_ic_date_count"] = rank_ic_date_count
         if mean_rank_ic is not None:
             metadata["mean_rank_ic"] = mean_rank_ic
+        if sharpe is not None:
+            metadata["sharpe"] = sharpe
         return metadata
 
 
@@ -800,6 +863,78 @@ def _rank_ic_stats(
         "positive_rank_ic_ratio": float((rank_ic_series["rank_ic"] > 0).mean()),
         "average_pair_count": float(rank_ic_series["pair_count"].mean()),
     }
+
+
+def compute_sharpe_ratio(
+    portfolio_returns: pd.DataFrame,
+    *,
+    return_column: str = SHARPE_RETURN_COLUMN,
+    annualization_factor: int = DEFAULT_ANNUALIZATION_FACTOR,
+) -> SharpeResult:
+    """Compute annualized Sharpe from a portfolio return series."""
+
+    if isinstance(annualization_factor, bool) or not isinstance(
+        annualization_factor,
+        int,
+    ):
+        msg = "annualization_factor must be an integer."
+        raise ValueError(msg)
+    if (
+        annualization_factor < MIN_ANNUALIZATION_FACTOR
+        or annualization_factor > MAX_ANNUALIZATION_FACTOR
+    ):
+        msg = (
+            "annualization_factor must be between "
+            f"{MIN_ANNUALIZATION_FACTOR} and {MAX_ANNUALIZATION_FACTOR}."
+        )
+        raise ValueError(msg)
+    if return_column not in portfolio_returns.columns:
+        msg = f"Portfolio returns are missing return column: {return_column}."
+        raise ValueError(msg)
+
+    returns = pd.to_numeric(portfolio_returns[return_column], errors="coerce").dropna()
+    if returns.empty:
+        return SharpeResult(
+            stats={
+                "method": "mean_std",
+                "return_column": return_column,
+                "annualization_factor": annualization_factor,
+                "return_count": 0,
+                "mean_period_return": None,
+                "std_period_return": None,
+                "annualized_mean_return": None,
+                "sharpe": None,
+                "positive_return_ratio": None,
+            }
+        )
+
+    mean_return = float(returns.mean())
+    positive_return_ratio = float((returns > 0).mean())
+    if len(returns) < 2:
+        std_return: float | None = None
+        sharpe: float | None = None
+    else:
+        std_return_raw = returns.std()
+        std_return = None if pd.isna(std_return_raw) else float(std_return_raw)
+        sharpe = (
+            None
+            if std_return is None or std_return == 0.0
+            else mean_return / std_return * float(np.sqrt(annualization_factor))
+        )
+
+    return SharpeResult(
+        stats={
+            "method": "mean_std",
+            "return_column": return_column,
+            "annualization_factor": annualization_factor,
+            "return_count": int(len(returns)),
+            "mean_period_return": mean_return,
+            "std_period_return": std_return,
+            "annualized_mean_return": mean_return * annualization_factor,
+            "sharpe": sharpe,
+            "positive_return_ratio": positive_return_ratio,
+        }
+    )
 
 
 def _backtest_stats(
