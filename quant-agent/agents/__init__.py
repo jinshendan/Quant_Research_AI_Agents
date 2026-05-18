@@ -68,6 +68,14 @@ from agents.market_data_cache import (
     MarketDataCacheLookup,
 )
 from agents.market_data_provider import AkShareMarketDataProvider, MarketDataProvider
+from agents.memory_agent import (
+    FactorMemoryRecord,
+    FactorMemoryStore,
+    MemoryAgent,
+    MemorySpec,
+    MemoryStorageResult,
+    build_factor_memory_record,
+)
 from agents.ohlcv_cleaner import OhlcvCleanResult, clean_ohlcv
 from agents.trading_calendar import (
     AkShareTradingCalendarProvider,
@@ -93,6 +101,8 @@ __all__ = [
     "FactorGenerationAgent",
     "FactorGenerationSpec",
     "FactorMatrixStore",
+    "FactorMemoryRecord",
+    "FactorMemoryStore",
     "FactorStorageContext",
     "FactorStorageResult",
     "FactorTemplate",
@@ -113,6 +123,9 @@ __all__ = [
     "MarketDataStorageContext",
     "MarketDataStorageResult",
     "MarketDataSpec",
+    "MemoryAgent",
+    "MemorySpec",
+    "MemoryStorageResult",
     "OhlcvCleanResult",
     "RankTransformResult",
     "RankTransformSpec",
@@ -125,6 +138,7 @@ __all__ = [
     "apply_rank_transforms",
     "apply_rolling_features",
     "attach_benchmark_tests_to_result_json",
+    "build_factor_memory_record",
     "clean_ohlcv",
     "compute_drawdown",
     "compute_information_coefficient",

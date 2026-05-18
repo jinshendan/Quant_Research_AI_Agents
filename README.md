@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-21：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成和 benchmark tests。
+> 当前项目处于早期搭建阶段。已完成 Day 1-22：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests 和 MemoryAgent JSONL 存储。
 
 ## Why This Project
 
@@ -67,11 +67,13 @@ Implemented:
 - drawdown curve and max drawdown calculation for the long/short return series
 - final backtest result JSON generation with optional file persistence
 - deterministic benchmark tests against backtest result JSON
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, and benchmark tests
+- `MemoryAgent` for writing compact factor research records to JSONL
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, and MemoryAgent behavior
 
 Not implemented yet:
 
-- memory and report generation
+- FAISS retrieval and factor wiki generation
+- report generation
 - Streamlit dashboard
 
 ## Project Structure
@@ -97,6 +99,7 @@ Not implemented yet:
     │   ├── hypothesis_agent.py
     │   ├── market_data_cache.py
     │   ├── market_data_provider.py
+    │   ├── memory_agent.py
     │   ├── ohlcv_cleaner.py
     │   └── trading_calendar.py
     ├── core/
@@ -552,6 +555,39 @@ for `mean_ic`, `mean_rank_ic`, `sharpe`, `total_return`, and
 `max_drawdown_abs`. Benchmark failures are reported as structured
 `benchmark_tests` output rather than transport-level agent errors.
 
+## MemoryAgent Example
+
+`MemoryAgent` consumes the benchmarked result JSON from `BacktestAgent` and
+writes a compact JSONL record under `memory/factor_memory.jsonl` by default.
+The stored record keeps factor identity, optional formula/hypothesis metadata,
+performance metrics, benchmark status, diagnostics, and source artifact paths.
+
+```python
+from agents.memory_agent import MemoryAgent
+from core.models import AgentRequest
+
+request = AgentRequest.create(
+    {
+        "result_json_path": "results/backtests/csi500_short_horizon.json",
+        "factor_metadata": {
+            "name": "alpha_001",
+            "formula": "rank(return_5d)",
+            "hypothesis": "Recent winners may continue over a short horizon.",
+            "market_condition": "short_horizon_cross_section",
+            "related_factors": ["return_5d", "momentum"],
+        },
+    }
+)
+
+response = MemoryAgent().run(request)
+print(response.output["memory_id"])
+print(response.output["memory_path"])
+print(response.output["memory_record"])
+```
+
+Day 22 intentionally uses JSONL only. Vector retrieval is scoped to Day 23,
+and factor wiki generation is scoped to Day 24.
+
 ## Configuration
 
 `AppConfig` reads optional environment variables:
@@ -596,8 +632,9 @@ Week 1:
 - Day 19: drawdown calculation
 - Day 20: final result JSON generation
 - Day 21: benchmark tests
+- Day 22: MemoryAgent JSONL records
 
-Next steps cover memory, reporting, and dashboard.
+Next steps cover FAISS retrieval, factor wiki generation, reporting, and dashboard.
 
 ## Engineering Principles
 

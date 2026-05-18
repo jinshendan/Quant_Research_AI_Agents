@@ -916,6 +916,68 @@ state = backtest_benchmark_tested
 next_action = Build MemoryAgent in Day 22.
 ```
 
+## Day 22 --- MemoryAgent
+
+Implemented in `quant-agent/`:
+
+-   `MemoryAgent` in `quant-agent/agents/memory_agent.py`
+-   `MemorySpec` request validation for either `payload.result_json` or
+    `payload.result_json_path`
+-   optional `payload.factor_metadata` for formula, hypothesis, turnover,
+    market condition, related factors, and paper reference fields
+-   `build_factor_memory_record(...)` for compact factor memory extraction from
+    a Day 21 benchmarked result JSON
+-   `FactorMemoryStore` for atomic file-backed JSONL persistence
+-   default storage path under `memory/factor_memory.jsonl`
+-   structured logs for validation, memory record construction, and persistence
+-   tests for inline payloads, path payloads, invalid result states, benchmark
+    failure diagnostics, JSONL persistence, and missing drawdown metrics
+
+Current MemoryAgent payload:
+
+```json
+{
+  "result_json_path": "results/backtests/csi500_short_horizon.json",
+  "factor_metadata": {
+    "name": "alpha_001",
+    "formula": "rank(return_5d)",
+    "hypothesis": "Recent winners may continue over a short horizon.",
+    "turnover": 0.18,
+    "market_condition": "short_horizon_cross_section",
+    "related_factors": ["return_5d", "momentum"],
+    "paper_reference": "internal-note"
+  }
+}
+```
+
+Current MemoryAgent output:
+
+```text
+state = memory_record_saved
+memory_record
+memory_id
+memory_path
+storage
+next_action = Integrate FAISS in Day 23.
+```
+
+The Day 22 memory record schema includes:
+
+```text
+schema_version
+memory_id
+created_at
+source
+factor
+performance
+benchmark
+diagnostics
+artifacts
+```
+
+Day 22 is intentionally a durable JSONL memory layer only. FAISS retrieval is
+scoped to Day 23, and factor wiki generation is scoped to Day 24.
+
 ------------------------------------------------------------------------
 
 # Memory Schema
