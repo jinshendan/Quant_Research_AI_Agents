@@ -1,6 +1,12 @@
 """Agent implementations are added incrementally according to TASKS.md."""
 
-from agents.backtest_agent import BacktestAgent, BacktestBuildResult, BacktestSpec
+from agents.backtest_agent import (
+    BacktestAgent,
+    BacktestBuildResult,
+    BacktestSpec,
+    InformationCoefficientResult,
+    compute_information_coefficient,
+)
 from agents.data_agent import DataAgent, MarketDataSpec
 from agents.duckdb_store import (
     DuckDBMarketDataStore,
@@ -85,6 +91,7 @@ __all__ = [
     "HypothesisAgent",
     "HypothesisSpec",
     "HypothesisTemplate",
+    "InformationCoefficientResult",
     "MarketDataCache",
     "MarketDataCacheEntry",
     "MarketDataCacheIdentity",
@@ -103,4 +110,5 @@ __all__ = [
     "apply_rank_transforms",
     "apply_rolling_features",
     "clean_ohlcv",
+    "compute_information_coefficient",
 ]

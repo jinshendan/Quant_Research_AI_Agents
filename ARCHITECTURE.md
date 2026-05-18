@@ -694,9 +694,35 @@ The portfolio return preview has:
 date, long_return, short_return, long_short_return, long_count, short_count
 ```
 
-Day 15 intentionally stops at building the backtest return series and coverage
-statistics. IC, RankIC, Sharpe, drawdown, and result JSON generation remain
-scoped to Days 16-20.
+## Day 16 --- Information Coefficient
+
+Implemented in `quant-agent/`:
+
+-   `InformationCoefficientResult` result model in
+    `quant-agent/agents/backtest_agent.py`
+-   `compute_information_coefficient(...)` for cross-sectional Pearson IC by
+    trading date
+-   integration into `BacktestAgent.run(...)` after the Day 15 backtest panel
+    is built
+-   IC output preview with `date`, `ic`, `raw_ic`, and `pair_count`
+-   IC summary statistics: mean IC, IC standard deviation, positive IC ratio,
+    average pair count, IC date count, and skipped date count
+-   direction adjustment through `payload.factor_direction`; negative-direction
+    factors keep `raw_ic` and report `ic = -raw_ic`
+-   tests for positive IC, negative-direction adjustment, skipped undefined IC
+    dates, and BacktestAgent response integration
+
+Current IC output fields:
+
+```text
+ic_series_columns
+ic_series_preview
+ic_stats
+```
+
+`ic_stats.method` is currently `pearson`. Day 16 intentionally does not compute
+RankIC, Sharpe, drawdown, or final result JSON. Those remain scoped to Days
+17-20.
 
 ------------------------------------------------------------------------
 

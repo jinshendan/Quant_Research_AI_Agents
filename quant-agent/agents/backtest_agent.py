@@ -30,6 +30,7 @@ PORTFOLIO_COLUMNS = (
     "long_count",
     "short_count",
 )
+IC_COLUMNS = ("date", "ic", "raw_ic", "pair_count")
 DEFAULT_FORWARD_RETURN_DAYS = 1
 DEFAULT_PREVIEW_ROWS = 5
 MAX_PREVIEW_ROWS = 50
@@ -123,6 +124,14 @@ class PortfolioBuildResult:
 
 
 @dataclass(frozen=True, slots=True)
+class InformationCoefficientResult:
+    """Cross-sectional Pearson IC series and summary statistics."""
+
+    data: pd.DataFrame
+    stats: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
 class BacktestBuildResult:
     """Backtest-ready panel and derived portfolio return series."""
 
@@ -203,6 +212,39 @@ class BacktestAgent:
             "Built factor backtest series.",
             extra={"action": "build_backtest", "status": "success"},
         )
+        self.logger.info(
+            "Computing information coefficient.",
+            extra={"action": "compute_ic", "status": "running"},
+        )
+        try:
+            ic_result = compute_information_coefficient(
+                result.panel,
+                factor_column=result.factor_column,
+                factor_direction=spec.factor_direction,
+            )
+        except ValueError as exc:
+            elapsed = perf_counter() - started_at
+            self.logger.warning(
+                "Information coefficient calculation failed.",
+                extra={"action": "compute_ic", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    factor_matrix_path=result.factor_matrix_path,
+                    aligned_data_path=result.aligned_data_path,
+                    factor_column=result.factor_column,
+                    portfolio_date_count=len(result.portfolio_returns),
+                    usable_row_count=result.stats["usable_row_count"],
+                ),
+            )
+        elapsed = perf_counter() - started_at
+        self.logger.info(
+            "Computed information coefficient.",
+            extra={"action": "compute_ic", "status": "success"},
+        )
         return AgentResponse.success(
             output={
                 "state": "backtest_built",
@@ -214,15 +256,22 @@ class BacktestAgent:
                 "forward_return_days": spec.forward_return_days,
                 "quantile_count": spec.quantile_count,
                 "portfolio_return_columns": list(PORTFOLIO_COLUMNS),
+                "ic_series_columns": list(IC_COLUMNS),
                 "row_count": len(result.panel),
                 "usable_row_count": result.stats["usable_row_count"],
                 "portfolio_date_count": len(result.portfolio_returns),
+                "ic_date_count": ic_result.stats["ic_date_count"],
                 "preview": _preview_records(
                     result.portfolio_returns,
                     spec.preview_rows,
                 ),
+                "ic_series_preview": _preview_records(
+                    ic_result.data,
+                    spec.preview_rows,
+                ),
                 "backtest_stats": result.stats,
-                "next_action": "Compute IC in Day 16.",
+                "ic_stats": ic_result.stats,
+                "next_action": "Compute RankIC in Day 17.",
             },
             metadata=self._metadata(
                 request,
@@ -232,6 +281,8 @@ class BacktestAgent:
                 factor_column=result.factor_column,
                 portfolio_date_count=len(result.portfolio_returns),
                 usable_row_count=result.stats["usable_row_count"],
+                ic_date_count=ic_result.stats["ic_date_count"],
+                mean_ic=ic_result.stats["mean_ic"],
             ),
         )
 
@@ -316,6 +367,8 @@ class BacktestAgent:
         factor_column: str | None = None,
         portfolio_date_count: int | None = None,
         usable_row_count: int | None = None,
+        ic_date_count: int | None = None,
+        mean_ic: float | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -332,6 +385,10 @@ class BacktestAgent:
             metadata["portfolio_date_count"] = portfolio_date_count
         if usable_row_count is not None:
             metadata["usable_row_count"] = usable_row_count
+        if ic_date_count is not None:
+            metadata["ic_date_count"] = ic_date_count
+        if mean_ic is not None:
+            metadata["mean_ic"] = mean_ic
         return metadata
 
 
@@ -509,6 +566,91 @@ def _build_portfolio_returns(
         data=portfolio_returns,
         stats={"skipped_date_count": skipped_date_count},
     )
+
+
+def compute_information_coefficient(
+    panel: pd.DataFrame,
+    *,
+    factor_column: str,
+    factor_direction: FactorDirection = "positive",
+) -> InformationCoefficientResult:
+    """Compute cross-sectional Pearson IC by trading date."""
+
+    if factor_direction not in SUPPORTED_FACTOR_DIRECTIONS:
+        msg = "factor_direction must be either positive or negative."
+        raise ValueError(msg)
+    missing_columns = [
+        column
+        for column in ("date", factor_column, FORWARD_RETURN_COLUMN)
+        if column not in panel.columns
+    ]
+    if missing_columns:
+        msg = f"IC panel is missing required columns: {', '.join(missing_columns)}."
+        raise ValueError(msg)
+
+    rows: list[dict[str, Any]] = []
+    skipped_date_count = 0
+    direction_multiplier = -1.0 if factor_direction == "negative" else 1.0
+
+    for trade_date, group in panel.groupby("date", sort=True):
+        usable = group[[factor_column, FORWARD_RETURN_COLUMN]].dropna()
+        if len(usable) < 2:
+            skipped_date_count += 1
+            continue
+        if (
+            usable[factor_column].nunique(dropna=True) < 2
+            or usable[FORWARD_RETURN_COLUMN].nunique(dropna=True) < 2
+        ):
+            skipped_date_count += 1
+            continue
+
+        raw_ic = usable[factor_column].corr(usable[FORWARD_RETURN_COLUMN])
+        if pd.isna(raw_ic):
+            skipped_date_count += 1
+            continue
+        raw_ic_float = float(raw_ic)
+        rows.append(
+            {
+                "date": trade_date,
+                "ic": direction_multiplier * raw_ic_float,
+                "raw_ic": raw_ic_float,
+                "pair_count": int(len(usable)),
+            }
+        )
+
+    ic_series = pd.DataFrame(rows, columns=IC_COLUMNS)
+    if not ic_series.empty:
+        ic_series = ic_series.sort_values("date").reset_index(drop=True)
+    return InformationCoefficientResult(
+        data=ic_series,
+        stats=_ic_stats(ic_series, skipped_date_count),
+    )
+
+
+def _ic_stats(ic_series: pd.DataFrame, skipped_date_count: int) -> dict[str, Any]:
+    if ic_series.empty:
+        return {
+            "method": "pearson",
+            "ic_date_count": 0,
+            "skipped_date_count": skipped_date_count,
+            "mean_ic": None,
+            "std_ic": None,
+            "positive_ic_ratio": None,
+            "average_pair_count": 0.0,
+        }
+
+    mean_ic = float(ic_series["ic"].mean())
+    std_ic_raw = ic_series["ic"].std()
+    std_ic = None if pd.isna(std_ic_raw) else float(std_ic_raw)
+    return {
+        "method": "pearson",
+        "ic_date_count": len(ic_series),
+        "skipped_date_count": skipped_date_count,
+        "mean_ic": mean_ic,
+        "std_ic": std_ic,
+        "positive_ic_ratio": float((ic_series["ic"] > 0).mean()),
+        "average_pair_count": float(ic_series["pair_count"].mean()),
+    }
 
 
 def _backtest_stats(

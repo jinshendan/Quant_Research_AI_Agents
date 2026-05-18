@@ -473,7 +473,7 @@ Perfect architecture later.
 
 # Current Incremental Status
 
-Implemented through Day 15:
+Implemented through Day 16:
 
 - DataAgent ingestion, cleaning, trading-calendar alignment, DuckDB storage, and cache
 - HypothesisAgent deterministic alpha hypothesis generation
@@ -481,8 +481,9 @@ Implemented through Day 15:
 - FeatureAgent factor computation with ranking and rolling-window transforms
 - generated factor matrix persistence under `factors/generated/` with JSON lineage manifests
 - BacktestAgent construction of long/short factor return series from saved factor matrices
+- Pearson IC calculation by trading date with direction-adjusted IC output
 
 Next implementation focus:
 
-Day 16 should compute IC from the backtest-ready factor/forward-return panel
-without adding RankIC, Sharpe, drawdown, or full result JSON yet.
+Day 17 should compute RankIC from the backtest-ready factor/forward-return panel
+without adding Sharpe, drawdown, or full result JSON yet.
