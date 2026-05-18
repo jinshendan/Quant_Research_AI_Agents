@@ -812,8 +812,58 @@ drawdown_stats
 ```
 
 `drawdown_stats.method` is currently `cumulative_return`, compounding
-`long_short_return` into an equity curve. Day 19 intentionally does not
-generate the final result JSON. That remains scoped to Day 20.
+`long_short_return` into an equity curve.
+
+## Day 20 --- Result JSON
+
+Implemented in `quant-agent/`:
+
+-   `BacktestResultJson` result model in
+    `quant-agent/agents/backtest_agent.py`
+-   `generate_backtest_result_json(...)` for assembling the final backtest
+    handoff document from the Day 15-19 outputs
+-   optional `payload.result_json_path` for persisting the result document
+    without changing the default in-memory workflow
+-   `save_backtest_result_json(...)` for atomic JSON writes with stable key
+    ordering and strict JSON serialization
+-   integration into `BacktestAgent.run(...)` after the Day 19 drawdown
+    calculation
+-   tests for response integration, optional persistence, serialized file
+    equality, and no-path behavior
+
+Current result JSON output fields:
+
+```text
+result_json
+result_json_path
+```
+
+The result JSON schema currently includes:
+
+```text
+schema_version
+state
+generated_at
+agent
+task_id
+request
+inputs
+summary
+metrics
+previews
+next_action
+```
+
+`summary` provides the compact downstream view: row counts, IC date counts,
+mean IC, mean RankIC, Sharpe, max drawdown, total return, and end equity.
+`metrics` preserves the full Backtest, IC, RankIC, Sharpe, and Drawdown
+statistic groups. `previews` carries bounded records from portfolio returns,
+IC series, RankIC series, and the drawdown curve so report and benchmark
+agents can inspect representative outputs without loading every intermediate
+file.
+
+Day 20 intentionally does not run benchmark tests. That remains scoped to Day
+21.
 
 ------------------------------------------------------------------------
 

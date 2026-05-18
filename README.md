@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-19：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe 和 Drawdown 计算。
+> 当前项目处于早期搭建阶段。已完成 Day 1-20：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算和最终 result JSON 生成。
 
 ## Why This Project
 
@@ -65,11 +65,12 @@ Implemented:
 - Spearman RankIC calculation by trading date for factor/forward-return panels
 - annualized Sharpe calculation for the long/short return series
 - drawdown curve and max drawdown calculation for the long/short return series
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, and Drawdown calculation
+- final backtest result JSON generation with optional file persistence
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, and result JSON generation
 
 Not implemented yet:
 
-- final result JSON and benchmark evaluation
+- benchmark evaluation
 - memory and report generation
 - Streamlit dashboard
 
@@ -476,7 +477,7 @@ lookback window, signal tags, and risk flags.
 `BacktestAgent` consumes a saved factor matrix, resolves the aligned OHLCV
 source from the Day 14 manifest when available, computes forward returns from
 `close`, builds a simple long/short factor return series, and computes Pearson
-IC, Spearman RankIC, annualized Sharpe, and drawdown.
+IC, Spearman RankIC, annualized Sharpe, drawdown, and a final result JSON.
 
 ```python
 from agents.backtest_agent import BacktestAgent
@@ -491,6 +492,7 @@ request = AgentRequest.create(
         "quantile_count": 5,
         "annualization_factor": 252,
         "preview_rows": 5,
+        "result_json_path": "results/backtests/csi500_short_horizon.json",
     }
 )
 
@@ -504,6 +506,8 @@ print(response.output["rank_ic_stats"])
 print(response.output["sharpe_stats"])
 print(response.output["drawdown_curve_preview"])
 print(response.output["drawdown_stats"])
+print(response.output["result_json"])
+print(response.output["result_json_path"])
 ```
 
 For a single-factor matrix, `factor_column` can be omitted. For multi-factor
@@ -523,6 +527,12 @@ valid observations or zero volatility, `sharpe` is reported as `None`.
 Drawdown compounds `long_short_return` into an equity curve and reports the
 maximum drawdown, peak date, trough date, recovery date, and drawdown coverage.
 If there are no valid returns, drawdown fields are reported as `None`.
+
+The result JSON is designed as the compact handoff artifact for downstream
+benchmarking, memory, and reporting agents. It includes a schema version,
+request echo, resolved inputs, summary metrics, full metric groups, preview
+records, and a next-action hint. When `result_json_path` is provided,
+`BacktestAgent` writes the same JSON document to disk atomically.
 
 ## Configuration
 
@@ -566,8 +576,9 @@ Week 1:
 - Day 17: Spearman RankIC calculation
 - Day 18: annualized Sharpe calculation
 - Day 19: drawdown calculation
+- Day 20: final result JSON generation
 
-Next steps cover result JSON, memory, reporting, and dashboard.
+Next steps cover benchmark evaluation, memory, reporting, and dashboard.
 
 ## Engineering Principles
 

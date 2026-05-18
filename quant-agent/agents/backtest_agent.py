@@ -35,6 +35,7 @@ RANK_IC_COLUMNS = ("date", "rank_ic", "raw_rank_ic", "pair_count")
 SHARPE_RETURN_COLUMN = "long_short_return"
 DRAWDOWN_RETURN_COLUMN = SHARPE_RETURN_COLUMN
 DRAWDOWN_COLUMNS = ("date", "equity_curve", "cumulative_peak", "drawdown")
+BACKTEST_RESULT_SCHEMA_VERSION = 1
 DEFAULT_ANNUALIZATION_FACTOR = 252
 DEFAULT_FORWARD_RETURN_DAYS = 1
 DEFAULT_PREVIEW_ROWS = 5
@@ -57,6 +58,7 @@ class BacktestSpec:
     forward_return_days: int = DEFAULT_FORWARD_RETURN_DAYS
     quantile_count: int = DEFAULT_QUANTILE_COUNT
     annualization_factor: int = DEFAULT_ANNUALIZATION_FACTOR
+    result_json_path: Path | None = None
     preview_rows: int = DEFAULT_PREVIEW_ROWS
 
     @classmethod
@@ -64,6 +66,7 @@ class BacktestSpec:
         factor_matrix_path = _optional_path(payload, "factor_matrix_path")
         factor_manifest_path = _optional_path(payload, "factor_manifest_path")
         aligned_data_path = _optional_path(payload, "aligned_data_path")
+        result_json_path = _optional_path(payload, "result_json_path")
         if factor_matrix_path is None and factor_manifest_path is None:
             msg = "payload.factor_matrix_path or payload.factor_manifest_path is required."
             raise ValueError(msg)
@@ -109,6 +112,7 @@ class BacktestSpec:
             forward_return_days=forward_return_days,
             quantile_count=quantile_count,
             annualization_factor=annualization_factor,
+            result_json_path=result_json_path,
             preview_rows=preview_rows,
         )
 
@@ -128,6 +132,9 @@ class BacktestSpec:
             "forward_return_days": self.forward_return_days,
             "quantile_count": self.quantile_count,
             "annualization_factor": self.annualization_factor,
+            "result_json_path": (
+                str(self.result_json_path) if self.result_json_path else None
+            ),
             "preview_rows": self.preview_rows,
         }
 
@@ -169,6 +176,14 @@ class DrawdownResult:
 
     data: pd.DataFrame
     stats: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestResultJson:
+    """Final JSON payload for a factor backtest run."""
+
+    document: dict[str, Any]
+    path: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,9 +405,56 @@ class BacktestAgent:
             "Computed drawdown.",
             extra={"action": "compute_drawdown", "status": "success"},
         )
+        self.logger.info(
+            "Generating result JSON.",
+            extra={"action": "generate_result_json", "status": "running"},
+        )
+        try:
+            result_json = generate_backtest_result_json(
+                request=request,
+                spec=spec,
+                backtest_result=result,
+                ic_result=ic_result,
+                rank_ic_result=rank_ic_result,
+                sharpe_result=sharpe_result,
+                drawdown_result=drawdown_result,
+            )
+            result_json_path = save_backtest_result_json(
+                result_json,
+                spec.result_json_path,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            elapsed = perf_counter() - started_at
+            self.logger.warning(
+                "Result JSON generation failed.",
+                extra={"action": "generate_result_json", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    factor_matrix_path=result.factor_matrix_path,
+                    aligned_data_path=result.aligned_data_path,
+                    factor_column=result.factor_column,
+                    portfolio_date_count=len(result.portfolio_returns),
+                    usable_row_count=result.stats["usable_row_count"],
+                    ic_date_count=ic_result.stats["ic_date_count"],
+                    mean_ic=ic_result.stats["mean_ic"],
+                    rank_ic_date_count=rank_ic_result.stats["rank_ic_date_count"],
+                    mean_rank_ic=rank_ic_result.stats["mean_rank_ic"],
+                    sharpe=sharpe_result.stats["sharpe"],
+                    max_drawdown=drawdown_result.stats["max_drawdown"],
+                ),
+            )
+        elapsed = perf_counter() - started_at
+        self.logger.info(
+            "Generated result JSON.",
+            extra={"action": "generate_result_json", "status": "success"},
+        )
         return AgentResponse.success(
             output={
-                "state": "backtest_built",
+                "state": "backtest_result_generated",
                 "request": spec.to_dict(),
                 "factor_matrix_path": str(result.factor_matrix_path),
                 "aligned_data_path": str(result.aligned_data_path),
@@ -431,7 +493,9 @@ class BacktestAgent:
                 "rank_ic_stats": rank_ic_result.stats,
                 "sharpe_stats": sharpe_result.stats,
                 "drawdown_stats": drawdown_result.stats,
-                "next_action": "Generate result JSON in Day 20.",
+                "result_json": result_json,
+                "result_json_path": str(result_json_path) if result_json_path else None,
+                "next_action": "Run benchmark tests in Day 21.",
             },
             metadata=self._metadata(
                 request,
@@ -447,6 +511,7 @@ class BacktestAgent:
                 mean_rank_ic=rank_ic_result.stats["mean_rank_ic"],
                 sharpe=sharpe_result.stats["sharpe"],
                 max_drawdown=drawdown_result.stats["max_drawdown"],
+                result_json_path=result_json_path,
             ),
         )
 
@@ -537,6 +602,7 @@ class BacktestAgent:
         mean_rank_ic: float | None = None,
         sharpe: float | None = None,
         max_drawdown: float | None = None,
+        result_json_path: Path | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -565,6 +631,8 @@ class BacktestAgent:
             metadata["sharpe"] = sharpe
         if max_drawdown is not None:
             metadata["max_drawdown"] = max_drawdown
+        if result_json_path is not None:
+            metadata["result_json_path"] = str(result_json_path)
         return metadata
 
 
@@ -1089,6 +1157,97 @@ def _drawdown_stats(curve: pd.DataFrame, return_column: str) -> dict[str, Any]:
         "drawdown_period_count": int((curve["drawdown"] < 0.0).sum()),
         "average_drawdown": average_drawdown,
     }
+
+
+def generate_backtest_result_json(
+    *,
+    request: AgentRequest,
+    spec: BacktestSpec,
+    backtest_result: BacktestBuildResult,
+    ic_result: InformationCoefficientResult,
+    rank_ic_result: RankInformationCoefficientResult,
+    sharpe_result: SharpeResult,
+    drawdown_result: DrawdownResult,
+) -> dict[str, Any]:
+    """Build the final JSON-serializable backtest result document."""
+
+    document = {
+        "schema_version": BACKTEST_RESULT_SCHEMA_VERSION,
+        "state": "backtest_result_generated",
+        "generated_at": request.timestamp.isoformat(),
+        "agent": BacktestAgent.name,
+        "task_id": request.task_id,
+        "request": spec.to_dict(),
+        "inputs": {
+            "factor_matrix_path": str(backtest_result.factor_matrix_path),
+            "aligned_data_path": str(backtest_result.aligned_data_path),
+            "factor_column": backtest_result.factor_column,
+            "factor_direction": spec.factor_direction,
+            "forward_return_days": spec.forward_return_days,
+            "quantile_count": spec.quantile_count,
+            "annualization_factor": spec.annualization_factor,
+        },
+        "summary": {
+            "row_count": len(backtest_result.panel),
+            "usable_row_count": backtest_result.stats["usable_row_count"],
+            "portfolio_date_count": len(backtest_result.portfolio_returns),
+            "ic_date_count": ic_result.stats["ic_date_count"],
+            "rank_ic_date_count": rank_ic_result.stats["rank_ic_date_count"],
+            "mean_ic": ic_result.stats["mean_ic"],
+            "mean_rank_ic": rank_ic_result.stats["mean_rank_ic"],
+            "sharpe": sharpe_result.stats["sharpe"],
+            "max_drawdown": drawdown_result.stats["max_drawdown"],
+            "total_return": drawdown_result.stats["total_return"],
+            "end_equity": drawdown_result.stats["end_equity"],
+        },
+        "metrics": {
+            "backtest": backtest_result.stats,
+            "ic": ic_result.stats,
+            "rank_ic": rank_ic_result.stats,
+            "sharpe": sharpe_result.stats,
+            "drawdown": drawdown_result.stats,
+        },
+        "previews": {
+            "portfolio_returns": _preview_records(
+                backtest_result.portfolio_returns,
+                spec.preview_rows,
+            ),
+            "ic_series": _preview_records(ic_result.data, spec.preview_rows),
+            "rank_ic_series": _preview_records(rank_ic_result.data, spec.preview_rows),
+            "drawdown_curve": _preview_records(
+                drawdown_result.data,
+                spec.preview_rows,
+            ),
+        },
+        "next_action": "Run benchmark tests in Day 21.",
+    }
+    json.dumps(document, ensure_ascii=True, allow_nan=False)
+    return document
+
+
+def save_backtest_result_json(
+    result_json: Mapping[str, Any],
+    result_json_path: Path | None,
+) -> Path | None:
+    """Optionally persist a result JSON document."""
+
+    if result_json_path is None:
+        return None
+
+    result_json_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = Path(f"{result_json_path}.tmp")
+    temp_path.write_text(
+        json.dumps(
+            result_json,
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        ),
+        encoding="utf-8",
+    )
+    temp_path.replace(result_json_path)
+    return result_json_path
 
 
 def _backtest_stats(

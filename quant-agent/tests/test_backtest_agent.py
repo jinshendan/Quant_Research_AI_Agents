@@ -14,6 +14,7 @@ from agents.backtest_agent import (
     compute_information_coefficient,
     compute_rank_information_coefficient,
     compute_sharpe_ratio,
+    save_backtest_result_json,
     normalize_aligned_prices,
     normalize_factor_matrix,
 )
@@ -156,6 +157,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
                 "factor_manifest_path": str(manifest_path),
                 "factor_column": "factor__alpha",
                 "quantile_count": 3,
+                "result_json_path": str(tmp_path / "results" / "backtest.json"),
                 "preview_rows": 5,
             },
             task_id="backtest-task-1",
@@ -163,11 +165,14 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     )
 
     assert response.status == "success"
-    assert response.output["state"] == "backtest_built"
+    assert response.output["state"] == "backtest_result_generated"
     assert response.output["factor_matrix_path"] == str(factor_matrix_path.resolve())
     assert response.output["aligned_data_path"] == str(aligned_path.resolve())
     assert response.output["factor_column"] == "factor__alpha"
     assert response.output["annualization_factor"] == 252
+    assert response.output["request"]["result_json_path"] == str(
+        tmp_path / "results" / "backtest.json"
+    )
     assert response.output["portfolio_date_count"] == 2
     assert response.output["usable_row_count"] == 12
     assert response.output["ic_date_count"] == 2
@@ -187,6 +192,9 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.metadata["mean_rank_ic"] == pytest.approx(1.0)
     assert response.metadata["sharpe"] == pytest.approx(33.67491648096547)
     assert response.metadata["max_drawdown"] == pytest.approx(0.0)
+    assert response.metadata["result_json_path"] == str(
+        tmp_path / "results" / "backtest.json"
+    )
 
     preview = response.output["preview"]
     assert preview[0]["date"] == "2024-01-01"
@@ -243,11 +251,25 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.output["drawdown_stats"]["total_return"] == pytest.approx(0.155)
     assert response.output["drawdown_stats"]["max_drawdown"] == pytest.approx(0.0)
     assert response.output["drawdown_stats"]["drawdown_period_count"] == 0
+    result_json = response.output["result_json"]
+    assert result_json["schema_version"] == 1
+    assert result_json["state"] == "backtest_result_generated"
+    assert result_json["task_id"] == "backtest-task-1"
+    assert result_json["inputs"]["factor_column"] == "factor__alpha"
+    assert result_json["summary"]["mean_rank_ic"] == pytest.approx(1.0)
+    assert result_json["summary"]["sharpe"] == pytest.approx(33.67491648096547)
+    assert result_json["summary"]["max_drawdown"] == pytest.approx(0.0)
+    assert result_json["metrics"]["drawdown"] == response.output["drawdown_stats"]
+    assert result_json["previews"]["portfolio_returns"] == response.output["preview"]
+    result_json_path = Path(response.output["result_json_path"])
+    assert result_json_path.is_file()
+    assert json.loads(result_json_path.read_text(encoding="utf-8")) == result_json
     assert "BacktestAgent | build_backtest | success" in stream.getvalue()
     assert "BacktestAgent | compute_ic | success" in stream.getvalue()
     assert "BacktestAgent | compute_rank_ic | success" in stream.getvalue()
     assert "BacktestAgent | compute_sharpe | success" in stream.getvalue()
     assert "BacktestAgent | compute_drawdown | success" in stream.getvalue()
+    assert "BacktestAgent | generate_result_json | success" in stream.getvalue()
 
 
 def test_backtest_agent_uses_single_factor_without_explicit_column(
@@ -270,6 +292,7 @@ def test_backtest_agent_uses_single_factor_without_explicit_column(
 
     assert response.status == "success"
     assert response.output["factor_column"] == "factor__alpha"
+    assert response.output["result_json_path"] is None
     assert response.output["preview"] == []
 
 
@@ -527,3 +550,15 @@ def test_compute_drawdown_returns_empty_stats_without_valid_returns() -> None:
 def test_compute_drawdown_rejects_missing_return_column() -> None:
     with pytest.raises(ValueError, match="long_short_return"):
         compute_drawdown(pd.DataFrame({"date": ["2024-01-01"], "other": [0.01]}))
+
+
+def test_save_backtest_result_json_is_optional(tmp_path: Path) -> None:
+    result_json = {"schema_version": 1, "state": "backtest_result_generated"}
+
+    assert save_backtest_result_json(result_json, None) is None
+
+    path = tmp_path / "nested" / "result.json"
+    saved_path = save_backtest_result_json(result_json, path)
+
+    assert saved_path == path
+    assert json.loads(path.read_text(encoding="utf-8")) == result_json

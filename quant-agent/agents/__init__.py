@@ -3,15 +3,18 @@
 from agents.backtest_agent import (
     BacktestAgent,
     BacktestBuildResult,
+    BacktestResultJson,
     BacktestSpec,
     DrawdownResult,
     InformationCoefficientResult,
     RankInformationCoefficientResult,
     SharpeResult,
     compute_drawdown,
+    generate_backtest_result_json,
     compute_information_coefficient,
     compute_rank_information_coefficient,
     compute_sharpe_ratio,
+    save_backtest_result_json,
 )
 from agents.data_agent import DataAgent, MarketDataSpec
 from agents.duckdb_store import (
@@ -76,6 +79,7 @@ __all__ = [
     "AkShareTradingCalendarProvider",
     "BacktestAgent",
     "BacktestBuildResult",
+    "BacktestResultJson",
     "BacktestSpec",
     "CalendarAlignmentResult",
     "DataAgent",
@@ -123,4 +127,6 @@ __all__ = [
     "compute_information_coefficient",
     "compute_rank_information_coefficient",
     "compute_sharpe_ratio",
+    "generate_backtest_result_json",
+    "save_backtest_result_json",
 ]

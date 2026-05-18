@@ -473,7 +473,7 @@ Perfect architecture later.
 
 # Current Incremental Status
 
-Implemented through Day 19:
+Implemented through Day 20:
 
 - DataAgent ingestion, cleaning, trading-calendar alignment, DuckDB storage, and cache
 - HypothesisAgent deterministic alpha hypothesis generation
@@ -485,8 +485,9 @@ Implemented through Day 19:
 - Spearman RankIC calculation by trading date with direction-adjusted RankIC output
 - annualized Sharpe calculation from the long/short return series
 - drawdown curve and max drawdown calculation from the long/short return series
+- final result JSON generation from BacktestAgent metrics and previews
 
 Next implementation focus:
 
-Day 20 should generate the final result JSON from the backtest outputs without
-adding benchmark tests yet.
+Day 21 should run benchmark tests against the generated backtest result JSON
+without adding memory, report generation, or dashboard features yet.
