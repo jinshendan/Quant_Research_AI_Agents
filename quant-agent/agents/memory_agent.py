@@ -11,6 +11,12 @@ from typing import Any
 from core.config import AppConfig
 from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
+from agents.memory_index import (
+    DEFAULT_MEMORY_INDEX_FILENAME,
+    DEFAULT_MEMORY_INDEX_METADATA_FILENAME,
+    FactorMemoryVectorIndex,
+    MemoryIndexBuildResult,
+)
 
 MEMORY_SCHEMA_VERSION = 1
 DEFAULT_MEMORY_FILENAME = "factor_memory.jsonl"
@@ -24,6 +30,8 @@ class MemorySpec:
     result_json: dict[str, Any] | None = None
     result_json_path: Path | None = None
     memory_path: Path | None = None
+    vector_index_path: Path | None = None
+    vector_metadata_path: Path | None = None
     factor_metadata: dict[str, Any] | None = None
 
     @classmethod
@@ -41,6 +49,8 @@ class MemorySpec:
             result_json=result_json,
             result_json_path=result_json_path,
             memory_path=_optional_path(payload, "memory_path"),
+            vector_index_path=_optional_path(payload, "vector_index_path"),
+            vector_metadata_path=_optional_path(payload, "vector_metadata_path"),
             factor_metadata=_optional_mapping(payload, "factor_metadata"),
         )
 
@@ -51,6 +61,12 @@ class MemorySpec:
                 str(self.result_json_path) if self.result_json_path else None
             ),
             "memory_path": str(self.memory_path) if self.memory_path else None,
+            "vector_index_path": (
+                str(self.vector_index_path) if self.vector_index_path else None
+            ),
+            "vector_metadata_path": (
+                str(self.vector_metadata_path) if self.vector_metadata_path else None
+            ),
             "factor_metadata": dict(self.factor_metadata or {}),
         }
 
@@ -209,7 +225,8 @@ class MemoryAgent:
         )
         try:
             memory_path = spec.memory_path or self.config.memory_dir / DEFAULT_MEMORY_FILENAME
-            storage_result = FactorMemoryStore(memory_path).append(record.document)
+            memory_store = FactorMemoryStore(memory_path)
+            storage_result = memory_store.append(record.document)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             elapsed = perf_counter() - started_at
             self.logger.warning(
@@ -224,11 +241,40 @@ class MemoryAgent:
                     memory_id=record.memory_id,
                 ),
             )
-
-        elapsed = perf_counter() - started_at
         self.logger.info(
             "Saved factor memory record.",
             extra={"action": "save_memory_record", "status": "success"},
+        )
+
+        self.logger.info(
+            "Building factor memory vector index.",
+            extra={"action": "build_vector_index", "status": "running"},
+        )
+        try:
+            vector_index_result = self.build_vector_index(spec, memory_store)
+        except (OSError, TypeError, ValueError, ImportError, json.JSONDecodeError) as exc:
+            elapsed = perf_counter() - started_at
+            self.logger.warning(
+                "Factor memory vector index build failed.",
+                extra={"action": "build_vector_index", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    memory_id=record.memory_id,
+                    memory_path=storage_result.memory_path,
+                    factor_name=record.document["factor"]["name"],
+                    benchmark_status=record.document["benchmark"]["status"],
+                    total_records=storage_result.total_records,
+                ),
+            )
+
+        elapsed = perf_counter() - started_at
+        self.logger.info(
+            "Built factor memory vector index.",
+            extra={"action": "build_vector_index", "status": "success"},
         )
         return AgentResponse.success(
             output={
@@ -238,7 +284,10 @@ class MemoryAgent:
                 "memory_id": record.memory_id,
                 "memory_path": str(storage_result.memory_path),
                 "storage": storage_result.to_dict(),
-                "next_action": "Integrate FAISS in Day 23.",
+                "vector_index": vector_index_result.to_dict(),
+                "vector_index_path": str(vector_index_result.index_path),
+                "vector_metadata_path": str(vector_index_result.metadata_path),
+                "next_action": "Save factor wiki in Day 24.",
             },
             metadata=self._metadata(
                 request,
@@ -248,6 +297,7 @@ class MemoryAgent:
                 factor_name=record.document["factor"]["name"],
                 benchmark_status=record.document["benchmark"]["status"],
                 total_records=storage_result.total_records,
+                vector_index_records=vector_index_result.record_count,
             ),
         )
 
@@ -266,6 +316,23 @@ class MemoryAgent:
             raise ValueError(msg)
         return document
 
+    def build_vector_index(
+        self,
+        spec: MemorySpec,
+        memory_store: FactorMemoryStore,
+    ) -> MemoryIndexBuildResult:
+        index_path = spec.vector_index_path or (
+            self.config.memory_dir / DEFAULT_MEMORY_INDEX_FILENAME
+        )
+        metadata_path = spec.vector_metadata_path or (
+            self.config.memory_dir / DEFAULT_MEMORY_INDEX_METADATA_FILENAME
+        )
+        records = memory_store.load_all()
+        return FactorMemoryVectorIndex(
+            index_path=index_path,
+            metadata_path=metadata_path,
+        ).build(records)
+
     def _metadata(
         self,
         request: AgentRequest,
@@ -276,6 +343,7 @@ class MemoryAgent:
         factor_name: str | None = None,
         benchmark_status: str | None = None,
         total_records: int | None = None,
+        vector_index_records: int | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -292,6 +360,8 @@ class MemoryAgent:
             metadata["benchmark_status"] = benchmark_status
         if total_records is not None:
             metadata["total_records"] = total_records
+        if vector_index_records is not None:
+            metadata["vector_index_records"] = vector_index_records
         return metadata
 
 

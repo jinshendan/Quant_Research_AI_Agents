@@ -76,6 +76,14 @@ from agents.memory_agent import (
     MemoryStorageResult,
     build_factor_memory_record,
 )
+from agents.memory_index import (
+    FactorMemoryVectorIndex,
+    HashingTextEmbedder,
+    MemoryIndexBuildResult,
+    MemorySearchMatch,
+    MemorySearchResult,
+    memory_record_to_text,
+)
 from agents.ohlcv_cleaner import OhlcvCleanResult, clean_ohlcv
 from agents.trading_calendar import (
     AkShareTradingCalendarProvider,
@@ -103,6 +111,7 @@ __all__ = [
     "FactorMatrixStore",
     "FactorMemoryRecord",
     "FactorMemoryStore",
+    "FactorMemoryVectorIndex",
     "FactorStorageContext",
     "FactorStorageResult",
     "FactorTemplate",
@@ -111,6 +120,7 @@ __all__ = [
     "FeatureGenerationResult",
     "FeatureSpec",
     "GeneratedFactor",
+    "HashingTextEmbedder",
     "HypothesisAgent",
     "HypothesisSpec",
     "HypothesisTemplate",
@@ -124,6 +134,9 @@ __all__ = [
     "MarketDataStorageResult",
     "MarketDataSpec",
     "MemoryAgent",
+    "MemoryIndexBuildResult",
+    "MemorySearchMatch",
+    "MemorySearchResult",
     "MemorySpec",
     "MemoryStorageResult",
     "OhlcvCleanResult",
@@ -145,6 +158,7 @@ __all__ = [
     "compute_rank_information_coefficient",
     "compute_sharpe_ratio",
     "generate_backtest_result_json",
+    "memory_record_to_text",
     "run_benchmark_tests",
     "save_backtest_result_json",
 ]

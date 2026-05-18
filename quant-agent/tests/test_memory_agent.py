@@ -12,6 +12,7 @@ from agents.memory_agent import (
     MemorySpec,
     build_factor_memory_record,
 )
+from agents.memory_index import FactorMemoryVectorIndex
 from core.config import AppConfig
 from core.logging import configure_logging, get_agent_logger
 from core.models import AgentRequest
@@ -94,6 +95,8 @@ def test_memory_spec_accepts_inline_result_json_and_metadata() -> None:
         {
             "result_json": result_json,
             "memory_path": "memory/custom.jsonl",
+            "vector_index_path": "memory/custom.faiss",
+            "vector_metadata_path": "memory/custom.faiss.metadata.json",
             "factor_metadata": {
                 "name": "alpha_001",
                 "formula": "rank(close)",
@@ -105,6 +108,8 @@ def test_memory_spec_accepts_inline_result_json_and_metadata() -> None:
     assert spec.result_json == result_json
     assert spec.result_json_path is None
     assert spec.memory_path == Path("memory/custom.jsonl").resolve()
+    assert spec.vector_index_path == Path("memory/custom.faiss").resolve()
+    assert spec.vector_metadata_path == Path("memory/custom.faiss.metadata.json").resolve()
     assert spec.factor_metadata == {
         "name": "alpha_001",
         "formula": "rank(close)",
@@ -151,12 +156,13 @@ def test_memory_agent_saves_factor_memory_record_from_result_json_path(
 
     assert response.status == "success"
     assert response.output["state"] == "memory_record_saved"
-    assert response.output["next_action"] == "Integrate FAISS in Day 23."
+    assert response.output["next_action"] == "Save factor wiki in Day 24."
     assert response.metadata["agent"] == "MemoryAgent"
     assert response.metadata["task_id"] == "memory-task-1"
     assert response.metadata["factor_name"] == "alpha_001"
     assert response.metadata["benchmark_status"] == "passed"
     assert response.metadata["total_records"] == 1
+    assert response.metadata["vector_index_records"] == 1
 
     memory_path = Path(response.output["memory_path"])
     assert memory_path == tmp_path / "memory" / "factor_memory.jsonl"
@@ -187,7 +193,21 @@ def test_memory_agent_saves_factor_memory_record_from_result_json_path(
     assert record["diagnostics"]["failure_reason"] is None
     assert record["diagnostics"]["related_factors"] == ["alpha_000"]
     assert record["artifacts"]["result_json_path"] == str(result_json_path.resolve())
+    vector_index_path = Path(response.output["vector_index_path"])
+    vector_metadata_path = Path(response.output["vector_metadata_path"])
+    assert vector_index_path == tmp_path / "memory" / "factor_memory.faiss"
+    assert vector_index_path.is_file()
+    assert vector_metadata_path.is_file()
+    assert response.output["vector_index"]["record_count"] == 1
+    search_result = FactorMemoryVectorIndex(
+        index_path=vector_index_path,
+        metadata_path=vector_metadata_path,
+    ).search("rank close alpha", top_k=1)
+    assert len(search_result.matches) == 1
+    assert search_result.matches[0].memory_id == response.output["memory_id"]
+    assert search_result.matches[0].factor_name == "alpha_001"
     assert "MemoryAgent | save_memory_record | success" in stream.getvalue()
+    assert "MemoryAgent | build_vector_index | success" in stream.getvalue()
 
 
 def test_memory_agent_derives_failure_reason_for_failed_benchmark(

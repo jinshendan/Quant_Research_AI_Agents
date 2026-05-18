@@ -929,7 +929,8 @@ Implemented in `quant-agent/`:
     a Day 21 benchmarked result JSON
 -   `FactorMemoryStore` for atomic file-backed JSONL persistence
 -   default storage path under `memory/factor_memory.jsonl`
--   structured logs for validation, memory record construction, and persistence
+-   structured logs for validation, memory record construction, persistence,
+    and vector index build
 -   tests for inline payloads, path payloads, invalid result states, benchmark
     failure diagnostics, JSONL persistence, and missing drawdown metrics
 
@@ -958,7 +959,10 @@ memory_record
 memory_id
 memory_path
 storage
-next_action = Integrate FAISS in Day 23.
+vector_index
+vector_index_path
+vector_metadata_path
+next_action = Save factor wiki in Day 24.
 ```
 
 The Day 22 memory record schema includes:
@@ -975,8 +979,54 @@ diagnostics
 artifacts
 ```
 
-Day 22 is intentionally a durable JSONL memory layer only. FAISS retrieval is
-scoped to Day 23, and factor wiki generation is scoped to Day 24.
+Day 22 introduced the durable JSONL memory layer. Day 23 adds vector retrieval
+on top of this store; factor wiki generation remains scoped to Day 24.
+
+## Day 23 --- FAISS Memory Retrieval
+
+Implemented in `quant-agent/`:
+
+-   `FactorMemoryVectorIndex` in `quant-agent/agents/memory_index.py`
+-   deterministic `HashingTextEmbedder` for local, network-free memory
+    embeddings
+-   FAISS `IndexFlatIP` build over compact factor memory records
+-   persisted index path `memory/factor_memory.faiss`
+-   persisted metadata path `memory/factor_memory.faiss.metadata.json`
+-   `memory_record_to_text(...)` for retrieval text construction from factor,
+    performance, benchmark, diagnostics, and artifact fields
+-   `FactorMemoryVectorIndex.search(...)` for top-k vector retrieval
+-   `MemoryAgent` integration that rebuilds the FAISS index after each JSONL
+    memory write
+-   tests for deterministic embeddings, text construction, index persistence,
+    top-k retrieval, empty indexes, invalid search parameters, and MemoryAgent
+    vector index output
+
+Current FAISS metadata schema:
+
+```text
+schema_version
+embedding_method
+dimension
+record_count
+records
+```
+
+Current MemoryAgent vector output:
+
+```text
+vector_index
+vector_index_path
+vector_metadata_path
+```
+
+The current embedding is intentionally simple and deterministic:
+`hashing_text_embedding_v1`. It avoids external model calls and keeps tests
+fully local. Later work can replace the embedder behind the same
+`FactorMemoryVectorIndex` boundary if semantic embedding quality becomes more
+important.
+
+Day 23 intentionally stops at retrieval. Factor wiki generation remains scoped
+to Day 24.
 
 ------------------------------------------------------------------------
 
