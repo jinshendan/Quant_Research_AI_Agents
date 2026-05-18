@@ -930,7 +930,7 @@ Implemented in `quant-agent/`:
 -   `FactorMemoryStore` for atomic file-backed JSONL persistence
 -   default storage path under `memory/factor_memory.jsonl`
 -   structured logs for validation, memory record construction, persistence,
-    and vector index build
+    vector index build, and wiki save
 -   tests for inline payloads, path payloads, invalid result states, benchmark
     failure diagnostics, JSONL persistence, and missing drawdown metrics
 
@@ -962,7 +962,9 @@ storage
 vector_index
 vector_index_path
 vector_metadata_path
-next_action = Save factor wiki in Day 24.
+factor_wiki
+factor_wiki_path
+next_action = Build ReportAgent in Day 25.
 ```
 
 The Day 22 memory record schema includes:
@@ -980,7 +982,7 @@ artifacts
 ```
 
 Day 22 introduced the durable JSONL memory layer. Day 23 adds vector retrieval
-on top of this store; factor wiki generation remains scoped to Day 24.
+on top of this store, and Day 24 adds wiki generation.
 
 ## Day 23 --- FAISS Memory Retrieval
 
@@ -1025,8 +1027,49 @@ fully local. Later work can replace the embedder behind the same
 `FactorMemoryVectorIndex` boundary if semantic embedding quality becomes more
 important.
 
-Day 23 intentionally stops at retrieval. Factor wiki generation remains scoped
-to Day 24.
+Day 23 introduced retrieval. Day 24 adds deterministic Markdown wiki
+generation on top of the same memory records.
+
+## Day 24 --- Factor Wiki
+
+Implemented in `quant-agent/`:
+
+-   `FactorWikiStore` in `quant-agent/agents/factor_wiki.py`
+-   `build_factor_wiki_markdown(...)` for deterministic Markdown rendering
+    from compact memory records
+-   `summarize_factor_wiki_records(...)` for record, unique factor, passed,
+    and failed benchmark counts
+-   default wiki path `memory/factor_wiki.md`
+-   `MemoryAgent` integration that refreshes the factor wiki after JSONL
+    persistence and FAISS index build
+-   tests for wiki markdown rendering, deterministic sorting, summary counts,
+    atomic file save, invalid records, and MemoryAgent wiki output
+
+Current MemoryAgent wiki output:
+
+```text
+factor_wiki
+factor_wiki_path
+```
+
+The wiki contains:
+
+```text
+Quant Factor Wiki heading
+Summary counts
+Summary table
+One section per memory record
+Artifact links and diagnostics
+```
+
+After Day 24, successful MemoryAgent responses use:
+
+```text
+next_action = Build ReportAgent in Day 25.
+```
+
+Day 24 intentionally saves a wiki only. ReportAgent construction remains scoped
+to Day 25.
 
 ------------------------------------------------------------------------
 

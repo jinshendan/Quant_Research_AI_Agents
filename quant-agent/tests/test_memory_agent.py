@@ -97,6 +97,7 @@ def test_memory_spec_accepts_inline_result_json_and_metadata() -> None:
             "memory_path": "memory/custom.jsonl",
             "vector_index_path": "memory/custom.faiss",
             "vector_metadata_path": "memory/custom.faiss.metadata.json",
+            "wiki_path": "memory/custom_wiki.md",
             "factor_metadata": {
                 "name": "alpha_001",
                 "formula": "rank(close)",
@@ -110,6 +111,7 @@ def test_memory_spec_accepts_inline_result_json_and_metadata() -> None:
     assert spec.memory_path == Path("memory/custom.jsonl").resolve()
     assert spec.vector_index_path == Path("memory/custom.faiss").resolve()
     assert spec.vector_metadata_path == Path("memory/custom.faiss.metadata.json").resolve()
+    assert spec.wiki_path == Path("memory/custom_wiki.md").resolve()
     assert spec.factor_metadata == {
         "name": "alpha_001",
         "formula": "rank(close)",
@@ -156,13 +158,16 @@ def test_memory_agent_saves_factor_memory_record_from_result_json_path(
 
     assert response.status == "success"
     assert response.output["state"] == "memory_record_saved"
-    assert response.output["next_action"] == "Save factor wiki in Day 24."
+    assert response.output["next_action"] == "Build ReportAgent in Day 25."
     assert response.metadata["agent"] == "MemoryAgent"
     assert response.metadata["task_id"] == "memory-task-1"
     assert response.metadata["factor_name"] == "alpha_001"
     assert response.metadata["benchmark_status"] == "passed"
     assert response.metadata["total_records"] == 1
     assert response.metadata["vector_index_records"] == 1
+    assert response.metadata["factor_wiki_path"] == str(
+        tmp_path / "memory" / "factor_wiki.md"
+    )
 
     memory_path = Path(response.output["memory_path"])
     assert memory_path == tmp_path / "memory" / "factor_memory.jsonl"
@@ -206,8 +211,14 @@ def test_memory_agent_saves_factor_memory_record_from_result_json_path(
     assert len(search_result.matches) == 1
     assert search_result.matches[0].memory_id == response.output["memory_id"]
     assert search_result.matches[0].factor_name == "alpha_001"
+    factor_wiki_path = Path(response.output["factor_wiki_path"])
+    assert factor_wiki_path == tmp_path / "memory" / "factor_wiki.md"
+    assert factor_wiki_path.is_file()
+    assert response.output["factor_wiki"]["record_count"] == 1
+    assert "### alpha_001" in factor_wiki_path.read_text(encoding="utf-8")
     assert "MemoryAgent | save_memory_record | success" in stream.getvalue()
     assert "MemoryAgent | build_vector_index | success" in stream.getvalue()
+    assert "MemoryAgent | save_factor_wiki | success" in stream.getvalue()
 
 
 def test_memory_agent_derives_failure_reason_for_failed_benchmark(

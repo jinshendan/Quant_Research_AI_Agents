@@ -43,6 +43,12 @@ from agents.factor_transforms import (
     RankTransformSpec,
     apply_rank_transforms,
 )
+from agents.factor_wiki import (
+    FactorWikiBuildResult,
+    FactorWikiStore,
+    build_factor_wiki_markdown,
+    summarize_factor_wiki_records,
+)
 from agents.factor_generator import (
     FactorBatchResult,
     FactorCandidateGenerator,
@@ -116,6 +122,8 @@ __all__ = [
     "FactorStorageResult",
     "FactorTemplate",
     "FactorTemplateLibrary",
+    "FactorWikiBuildResult",
+    "FactorWikiStore",
     "FeatureAgent",
     "FeatureGenerationResult",
     "FeatureSpec",
@@ -152,6 +160,7 @@ __all__ = [
     "apply_rolling_features",
     "attach_benchmark_tests_to_result_json",
     "build_factor_memory_record",
+    "build_factor_wiki_markdown",
     "clean_ohlcv",
     "compute_drawdown",
     "compute_information_coefficient",
@@ -161,4 +170,5 @@ __all__ = [
     "memory_record_to_text",
     "run_benchmark_tests",
     "save_backtest_result_json",
+    "summarize_factor_wiki_records",
 ]

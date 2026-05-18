@@ -473,7 +473,7 @@ Perfect architecture later.
 
 # Current Incremental Status
 
-Implemented through Day 23:
+Implemented through Day 24:
 
 - DataAgent ingestion, cleaning, trading-calendar alignment, DuckDB storage, and cache
 - HypothesisAgent deterministic alpha hypothesis generation
@@ -489,8 +489,9 @@ Implemented through Day 23:
 - deterministic benchmark tests against the generated result JSON
 - MemoryAgent persistence of compact factor memory records to JSONL
 - FAISS vector index build and retrieval over saved factor memory records
+- Markdown factor wiki generation from saved memory records
 
 Next implementation focus:
 
-Day 24 should save a factor wiki from memory records without adding report
-generation or dashboard features yet.
+Day 25 should build ReportAgent without adding markdown report generation or
+dashboard features yet.

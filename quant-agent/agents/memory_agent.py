@@ -11,6 +11,11 @@ from typing import Any
 from core.config import AppConfig
 from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
+from agents.factor_wiki import (
+    DEFAULT_FACTOR_WIKI_FILENAME,
+    FactorWikiBuildResult,
+    FactorWikiStore,
+)
 from agents.memory_index import (
     DEFAULT_MEMORY_INDEX_FILENAME,
     DEFAULT_MEMORY_INDEX_METADATA_FILENAME,
@@ -32,6 +37,7 @@ class MemorySpec:
     memory_path: Path | None = None
     vector_index_path: Path | None = None
     vector_metadata_path: Path | None = None
+    wiki_path: Path | None = None
     factor_metadata: dict[str, Any] | None = None
 
     @classmethod
@@ -51,6 +57,7 @@ class MemorySpec:
             memory_path=_optional_path(payload, "memory_path"),
             vector_index_path=_optional_path(payload, "vector_index_path"),
             vector_metadata_path=_optional_path(payload, "vector_metadata_path"),
+            wiki_path=_optional_path(payload, "wiki_path"),
             factor_metadata=_optional_mapping(payload, "factor_metadata"),
         )
 
@@ -67,6 +74,7 @@ class MemorySpec:
             "vector_metadata_path": (
                 str(self.vector_metadata_path) if self.vector_metadata_path else None
             ),
+            "wiki_path": str(self.wiki_path) if self.wiki_path else None,
             "factor_metadata": dict(self.factor_metadata or {}),
         }
 
@@ -271,10 +279,41 @@ class MemoryAgent:
                 ),
             )
 
-        elapsed = perf_counter() - started_at
         self.logger.info(
             "Built factor memory vector index.",
             extra={"action": "build_vector_index", "status": "success"},
+        )
+
+        self.logger.info(
+            "Saving factor wiki.",
+            extra={"action": "save_factor_wiki", "status": "running"},
+        )
+        try:
+            factor_wiki_result = self.save_factor_wiki(spec, memory_store)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            elapsed = perf_counter() - started_at
+            self.logger.warning(
+                "Factor wiki persistence failed.",
+                extra={"action": "save_factor_wiki", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    memory_id=record.memory_id,
+                    memory_path=storage_result.memory_path,
+                    factor_name=record.document["factor"]["name"],
+                    benchmark_status=record.document["benchmark"]["status"],
+                    total_records=storage_result.total_records,
+                    vector_index_records=vector_index_result.record_count,
+                ),
+            )
+
+        elapsed = perf_counter() - started_at
+        self.logger.info(
+            "Saved factor wiki.",
+            extra={"action": "save_factor_wiki", "status": "success"},
         )
         return AgentResponse.success(
             output={
@@ -287,7 +326,9 @@ class MemoryAgent:
                 "vector_index": vector_index_result.to_dict(),
                 "vector_index_path": str(vector_index_result.index_path),
                 "vector_metadata_path": str(vector_index_result.metadata_path),
-                "next_action": "Save factor wiki in Day 24.",
+                "factor_wiki": factor_wiki_result.to_dict(),
+                "factor_wiki_path": str(factor_wiki_result.wiki_path),
+                "next_action": "Build ReportAgent in Day 25.",
             },
             metadata=self._metadata(
                 request,
@@ -298,6 +339,7 @@ class MemoryAgent:
                 benchmark_status=record.document["benchmark"]["status"],
                 total_records=storage_result.total_records,
                 vector_index_records=vector_index_result.record_count,
+                factor_wiki_path=factor_wiki_result.wiki_path,
             ),
         )
 
@@ -333,6 +375,15 @@ class MemoryAgent:
             metadata_path=metadata_path,
         ).build(records)
 
+    def save_factor_wiki(
+        self,
+        spec: MemorySpec,
+        memory_store: FactorMemoryStore,
+    ) -> FactorWikiBuildResult:
+        wiki_path = spec.wiki_path or self.config.memory_dir / DEFAULT_FACTOR_WIKI_FILENAME
+        records = memory_store.load_all()
+        return FactorWikiStore(wiki_path).save(records)
+
     def _metadata(
         self,
         request: AgentRequest,
@@ -344,6 +395,7 @@ class MemoryAgent:
         benchmark_status: str | None = None,
         total_records: int | None = None,
         vector_index_records: int | None = None,
+        factor_wiki_path: Path | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -362,6 +414,8 @@ class MemoryAgent:
             metadata["total_records"] = total_records
         if vector_index_records is not None:
             metadata["vector_index_records"] = vector_index_records
+        if factor_wiki_path is not None:
+            metadata["factor_wiki_path"] = str(factor_wiki_path)
         return metadata
 
 

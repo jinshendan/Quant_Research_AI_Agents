@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-23：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储和 FAISS 检索索引。
+> 当前项目处于早期搭建阶段。已完成 Day 1-24：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引和 factor wiki 保存。
 
 ## Why This Project
 
@@ -69,11 +69,11 @@ Implemented:
 - deterministic benchmark tests against backtest result JSON
 - `MemoryAgent` for writing compact factor research records to JSONL
 - FAISS vector index build and search over factor memory records
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, and FAISS memory retrieval
+- Markdown factor wiki generation from saved memory records
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, FAISS memory retrieval, and factor wiki generation
 
 Not implemented yet:
 
-- factor wiki generation
 - report generation
 - Streamlit dashboard
 
@@ -96,6 +96,7 @@ Not implemented yet:
     │   ├── factor_store.py
     │   ├── factor_templates.py
     │   ├── factor_transforms.py
+    │   ├── factor_wiki.py
     │   ├── feature_agent.py
     │   ├── hypothesis_agent.py
     │   ├── market_data_cache.py
@@ -118,9 +119,10 @@ Not implemented yet:
     │   ├── validated/
     │   └── rejected/
     ├── memory/
-    │   ├── factor_wiki/
-    │   ├── research_logs/
-    │   └── vector_db/
+    │   ├── factor_memory.jsonl
+    │   ├── factor_memory.faiss
+    │   ├── factor_memory.faiss.metadata.json
+    │   └── factor_wiki.md
     ├── prompts/
     ├── skills/
     ├── tests/
@@ -585,6 +587,7 @@ response = MemoryAgent().run(request)
 print(response.output["memory_id"])
 print(response.output["memory_path"])
 print(response.output["vector_index_path"])
+print(response.output["factor_wiki_path"])
 print(response.output["memory_record"])
 ```
 
@@ -600,8 +603,20 @@ result = index.search("short-term momentum rank_ic sharpe", top_k=5)
 print(result.to_dict()["matches"])
 ```
 
-Day 23 intentionally stops at retrieval. Factor wiki generation is scoped to
-Day 24.
+`MemoryAgent` also refreshes `memory/factor_wiki.md` after each write. The wiki
+is a deterministic Markdown summary of saved factor records, with a summary
+table and one section per factor memory entry.
+
+```python
+from agents.factor_wiki import FactorWikiStore
+from agents.memory_agent import FactorMemoryStore
+
+records = FactorMemoryStore("memory/factor_memory.jsonl").load_all()
+result = FactorWikiStore("memory/factor_wiki.md").save(records)
+print(result.to_dict())
+```
+
+Day 24 intentionally stops at saving the wiki. ReportAgent is scoped to Day 25.
 
 ## Configuration
 
@@ -649,8 +664,9 @@ Week 1:
 - Day 21: benchmark tests
 - Day 22: MemoryAgent JSONL records
 - Day 23: FAISS memory retrieval
+- Day 24: factor wiki markdown
 
-Next steps cover factor wiki generation, reporting, and dashboard.
+Next steps cover report generation and dashboard.
 
 ## Engineering Principles
 
