@@ -10,6 +10,7 @@ import pytest
 from agents.backtest_agent import (
     BacktestAgent,
     BacktestSpec,
+    compute_drawdown,
     compute_information_coefficient,
     compute_rank_information_coefficient,
     compute_sharpe_ratio,
@@ -171,6 +172,12 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.output["usable_row_count"] == 12
     assert response.output["ic_date_count"] == 2
     assert response.output["rank_ic_date_count"] == 2
+    assert response.output["drawdown_curve_columns"] == [
+        "date",
+        "equity_curve",
+        "cumulative_peak",
+        "drawdown",
+    ]
     assert response.metadata["agent"] == "BacktestAgent"
     assert response.metadata["task_id"] == "backtest-task-1"
     assert response.metadata["portfolio_date_count"] == 2
@@ -179,6 +186,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.metadata["mean_ic"] > 0.99
     assert response.metadata["mean_rank_ic"] == pytest.approx(1.0)
     assert response.metadata["sharpe"] == pytest.approx(33.67491648096547)
+    assert response.metadata["max_drawdown"] == pytest.approx(0.0)
 
     preview = response.output["preview"]
     assert preview[0]["date"] == "2024-01-01"
@@ -224,10 +232,22 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
         33.67491648096547
     )
     assert response.output["sharpe_stats"]["positive_return_ratio"] == 1.0
+    drawdown_preview = response.output["drawdown_curve_preview"]
+    assert drawdown_preview[0]["date"] == "2024-01-01"
+    assert drawdown_preview[0]["equity_curve"] == pytest.approx(1.1)
+    assert drawdown_preview[0]["drawdown"] == pytest.approx(0.0)
+    assert response.output["drawdown_stats"]["method"] == "cumulative_return"
+    assert response.output["drawdown_stats"]["return_column"] == "long_short_return"
+    assert response.output["drawdown_stats"]["return_count"] == 2
+    assert response.output["drawdown_stats"]["end_equity"] == pytest.approx(1.155)
+    assert response.output["drawdown_stats"]["total_return"] == pytest.approx(0.155)
+    assert response.output["drawdown_stats"]["max_drawdown"] == pytest.approx(0.0)
+    assert response.output["drawdown_stats"]["drawdown_period_count"] == 0
     assert "BacktestAgent | build_backtest | success" in stream.getvalue()
     assert "BacktestAgent | compute_ic | success" in stream.getvalue()
     assert "BacktestAgent | compute_rank_ic | success" in stream.getvalue()
     assert "BacktestAgent | compute_sharpe | success" in stream.getvalue()
+    assert "BacktestAgent | compute_drawdown | success" in stream.getvalue()
 
 
 def test_backtest_agent_uses_single_factor_without_explicit_column(
@@ -440,3 +460,70 @@ def test_compute_sharpe_ratio_returns_none_for_zero_volatility() -> None:
 def test_compute_sharpe_ratio_rejects_missing_return_column() -> None:
     with pytest.raises(ValueError, match="long_short_return"):
         compute_sharpe_ratio(pd.DataFrame({"other_return": [0.01]}))
+
+
+def test_compute_drawdown_tracks_peak_trough_and_recovery() -> None:
+    result = compute_drawdown(
+        pd.DataFrame(
+            {
+                "date": [
+                    "2024-01-01",
+                    "2024-01-02",
+                    "2024-01-03",
+                    "2024-01-04",
+                ],
+                "long_short_return": [0.10, -0.20, 0.05, 0.25],
+            }
+        )
+    )
+
+    assert result.data["equity_curve"].tolist() == pytest.approx(
+        [1.1, 0.88, 0.924, 1.155]
+    )
+    assert result.data["drawdown"].tolist() == pytest.approx(
+        [0.0, -0.2, -0.16, 0.0]
+    )
+    assert result.stats["method"] == "cumulative_return"
+    assert result.stats["return_count"] == 4
+    assert result.stats["end_equity"] == pytest.approx(1.155)
+    assert result.stats["total_return"] == pytest.approx(0.155)
+    assert result.stats["max_drawdown"] == pytest.approx(-0.2)
+    assert result.stats["max_drawdown_abs"] == pytest.approx(0.2)
+    assert result.stats["peak_date"] == "2024-01-01"
+    assert result.stats["trough_date"] == "2024-01-02"
+    assert result.stats["recovery_date"] == "2024-01-04"
+    assert result.stats["drawdown_period_count"] == 2
+    assert result.stats["average_drawdown"] == pytest.approx(-0.18)
+
+
+def test_compute_drawdown_returns_empty_stats_without_valid_returns() -> None:
+    result = compute_drawdown(
+        pd.DataFrame(
+            {
+                "date": ["2024-01-01"],
+                "long_short_return": [None],
+            }
+        )
+    )
+
+    assert result.data.empty
+    assert result.stats == {
+        "method": "cumulative_return",
+        "return_column": "long_short_return",
+        "return_count": 0,
+        "start_equity": 1.0,
+        "end_equity": None,
+        "total_return": None,
+        "max_drawdown": None,
+        "max_drawdown_abs": None,
+        "peak_date": None,
+        "trough_date": None,
+        "recovery_date": None,
+        "drawdown_period_count": 0,
+        "average_drawdown": None,
+    }
+
+
+def test_compute_drawdown_rejects_missing_return_column() -> None:
+    with pytest.raises(ValueError, match="long_short_return"):
+        compute_drawdown(pd.DataFrame({"date": ["2024-01-01"], "other": [0.01]}))

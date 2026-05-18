@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-18：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC 和 Sharpe 计算。
+> 当前项目处于早期搭建阶段。已完成 Day 1-19：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe 和 Drawdown 计算。
 
 ## Why This Project
 
@@ -64,11 +64,12 @@ Implemented:
 - Pearson IC calculation by trading date for factor/forward-return panels
 - Spearman RankIC calculation by trading date for factor/forward-return panels
 - annualized Sharpe calculation for the long/short return series
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, and Sharpe calculation
+- drawdown curve and max drawdown calculation for the long/short return series
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, and Drawdown calculation
 
 Not implemented yet:
 
-- drawdown and benchmark evaluation metrics
+- final result JSON and benchmark evaluation
 - memory and report generation
 - Streamlit dashboard
 
@@ -475,8 +476,7 @@ lookback window, signal tags, and risk flags.
 `BacktestAgent` consumes a saved factor matrix, resolves the aligned OHLCV
 source from the Day 14 manifest when available, computes forward returns from
 `close`, builds a simple long/short factor return series, and computes Pearson
-IC, Spearman RankIC, and annualized Sharpe. It deliberately does not compute
-drawdown yet; that is a Week 3 follow-up task.
+IC, Spearman RankIC, annualized Sharpe, and drawdown.
 
 ```python
 from agents.backtest_agent import BacktestAgent
@@ -502,6 +502,8 @@ print(response.output["ic_stats"])
 print(response.output["rank_ic_series_preview"])
 print(response.output["rank_ic_stats"])
 print(response.output["sharpe_stats"])
+print(response.output["drawdown_curve_preview"])
+print(response.output["drawdown_stats"])
 ```
 
 For a single-factor matrix, `factor_column` can be omitted. For multi-factor
@@ -517,6 +519,10 @@ direction. RankIC follows the same direction-adjusted convention with
 Sharpe uses `long_short_return` by default, sample standard deviation, and
 `annualization_factor` from the request. If the return series has fewer than two
 valid observations or zero volatility, `sharpe` is reported as `None`.
+
+Drawdown compounds `long_short_return` into an equity curve and reports the
+maximum drawdown, peak date, trough date, recovery date, and drawdown coverage.
+If there are no valid returns, drawdown fields are reported as `None`.
 
 ## Configuration
 
@@ -559,8 +565,9 @@ Week 1:
 - Day 16: Pearson IC calculation
 - Day 17: Spearman RankIC calculation
 - Day 18: annualized Sharpe calculation
+- Day 19: drawdown calculation
 
-Next steps cover drawdown, result JSON, memory, reporting, and dashboard.
+Next steps cover result JSON, memory, reporting, and dashboard.
 
 ## Engineering Principles
 

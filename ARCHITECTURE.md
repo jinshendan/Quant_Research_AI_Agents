@@ -785,6 +785,36 @@ sharpe_stats
 of `long_short_return`. Day 18 intentionally does not compute drawdown or final
 result JSON. Those remain scoped to Days 19-20.
 
+## Day 19 --- Drawdown
+
+Implemented in `quant-agent/`:
+
+-   `DrawdownResult` result model in `quant-agent/agents/backtest_agent.py`
+-   `compute_drawdown(...)` for equity curve and drawdown calculation from the
+    long/short return series
+-   integration into `BacktestAgent.run(...)` after the Day 18 Sharpe
+    calculation
+-   drawdown curve preview with `date`, `equity_curve`, `cumulative_peak`, and
+    `drawdown`
+-   drawdown summary statistics: return count, start equity, end equity, total
+    return, max drawdown, absolute max drawdown, peak date, trough date,
+    recovery date, drawdown period count, and average drawdown
+-   graceful `None` drawdown statistics when no valid return observations exist
+-   tests for peak/trough/recovery tracking, empty valid returns, missing return
+    columns, and BacktestAgent response integration
+
+Current Drawdown output fields:
+
+```text
+drawdown_curve_columns
+drawdown_curve_preview
+drawdown_stats
+```
+
+`drawdown_stats.method` is currently `cumulative_return`, compounding
+`long_short_return` into an equity curve. Day 19 intentionally does not
+generate the final result JSON. That remains scoped to Day 20.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

@@ -33,6 +33,8 @@ PORTFOLIO_COLUMNS = (
 IC_COLUMNS = ("date", "ic", "raw_ic", "pair_count")
 RANK_IC_COLUMNS = ("date", "rank_ic", "raw_rank_ic", "pair_count")
 SHARPE_RETURN_COLUMN = "long_short_return"
+DRAWDOWN_RETURN_COLUMN = SHARPE_RETURN_COLUMN
+DRAWDOWN_COLUMNS = ("date", "equity_curve", "cumulative_peak", "drawdown")
 DEFAULT_ANNUALIZATION_FACTOR = 252
 DEFAULT_FORWARD_RETURN_DAYS = 1
 DEFAULT_PREVIEW_ROWS = 5
@@ -158,6 +160,14 @@ class RankInformationCoefficientResult:
 class SharpeResult:
     """Sharpe ratio and return-distribution statistics."""
 
+    stats: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class DrawdownResult:
+    """Drawdown curve and summary statistics."""
+
+    data: pd.DataFrame
     stats: dict[str, Any]
 
 
@@ -346,6 +356,40 @@ class BacktestAgent:
             "Computed Sharpe ratio.",
             extra={"action": "compute_sharpe", "status": "success"},
         )
+        self.logger.info(
+            "Computing drawdown.",
+            extra={"action": "compute_drawdown", "status": "running"},
+        )
+        try:
+            drawdown_result = compute_drawdown(result.portfolio_returns)
+        except ValueError as exc:
+            elapsed = perf_counter() - started_at
+            self.logger.warning(
+                "Drawdown calculation failed.",
+                extra={"action": "compute_drawdown", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    factor_matrix_path=result.factor_matrix_path,
+                    aligned_data_path=result.aligned_data_path,
+                    factor_column=result.factor_column,
+                    portfolio_date_count=len(result.portfolio_returns),
+                    usable_row_count=result.stats["usable_row_count"],
+                    ic_date_count=ic_result.stats["ic_date_count"],
+                    mean_ic=ic_result.stats["mean_ic"],
+                    rank_ic_date_count=rank_ic_result.stats["rank_ic_date_count"],
+                    mean_rank_ic=rank_ic_result.stats["mean_rank_ic"],
+                    sharpe=sharpe_result.stats["sharpe"],
+                ),
+            )
+        elapsed = perf_counter() - started_at
+        self.logger.info(
+            "Computed drawdown.",
+            extra={"action": "compute_drawdown", "status": "success"},
+        )
         return AgentResponse.success(
             output={
                 "state": "backtest_built",
@@ -360,6 +404,7 @@ class BacktestAgent:
                 "portfolio_return_columns": list(PORTFOLIO_COLUMNS),
                 "ic_series_columns": list(IC_COLUMNS),
                 "rank_ic_series_columns": list(RANK_IC_COLUMNS),
+                "drawdown_curve_columns": list(DRAWDOWN_COLUMNS),
                 "row_count": len(result.panel),
                 "usable_row_count": result.stats["usable_row_count"],
                 "portfolio_date_count": len(result.portfolio_returns),
@@ -377,11 +422,16 @@ class BacktestAgent:
                     rank_ic_result.data,
                     spec.preview_rows,
                 ),
+                "drawdown_curve_preview": _preview_records(
+                    drawdown_result.data,
+                    spec.preview_rows,
+                ),
                 "backtest_stats": result.stats,
                 "ic_stats": ic_result.stats,
                 "rank_ic_stats": rank_ic_result.stats,
                 "sharpe_stats": sharpe_result.stats,
-                "next_action": "Compute Drawdown in Day 19.",
+                "drawdown_stats": drawdown_result.stats,
+                "next_action": "Generate result JSON in Day 20.",
             },
             metadata=self._metadata(
                 request,
@@ -396,6 +446,7 @@ class BacktestAgent:
                 rank_ic_date_count=rank_ic_result.stats["rank_ic_date_count"],
                 mean_rank_ic=rank_ic_result.stats["mean_rank_ic"],
                 sharpe=sharpe_result.stats["sharpe"],
+                max_drawdown=drawdown_result.stats["max_drawdown"],
             ),
         )
 
@@ -485,6 +536,7 @@ class BacktestAgent:
         rank_ic_date_count: int | None = None,
         mean_rank_ic: float | None = None,
         sharpe: float | None = None,
+        max_drawdown: float | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -511,6 +563,8 @@ class BacktestAgent:
             metadata["mean_rank_ic"] = mean_rank_ic
         if sharpe is not None:
             metadata["sharpe"] = sharpe
+        if max_drawdown is not None:
+            metadata["max_drawdown"] = max_drawdown
         return metadata
 
 
@@ -937,6 +991,106 @@ def compute_sharpe_ratio(
     )
 
 
+def compute_drawdown(
+    portfolio_returns: pd.DataFrame,
+    *,
+    return_column: str = DRAWDOWN_RETURN_COLUMN,
+) -> DrawdownResult:
+    """Compute an equity curve and drawdowns from portfolio returns."""
+
+    missing_columns = [
+        column for column in ("date", return_column) if column not in portfolio_returns.columns
+    ]
+    if missing_columns:
+        msg = f"Portfolio returns are missing required columns: {', '.join(missing_columns)}."
+        raise ValueError(msg)
+
+    frame = portfolio_returns[["date", return_column]].copy()
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    frame[return_column] = pd.to_numeric(frame[return_column], errors="coerce")
+    if frame["date"].isna().any():
+        msg = "Portfolio returns contain invalid dates."
+        raise ValueError(msg)
+
+    frame = frame.dropna(subset=[return_column]).sort_values("date").reset_index(drop=True)
+    if frame.empty:
+        return DrawdownResult(
+            data=pd.DataFrame(columns=DRAWDOWN_COLUMNS),
+            stats={
+                "method": "cumulative_return",
+                "return_column": return_column,
+                "return_count": 0,
+                "start_equity": 1.0,
+                "end_equity": None,
+                "total_return": None,
+                "max_drawdown": None,
+                "max_drawdown_abs": None,
+                "peak_date": None,
+                "trough_date": None,
+                "recovery_date": None,
+                "drawdown_period_count": 0,
+                "average_drawdown": None,
+            },
+        )
+
+    equity_curve = (1.0 + frame[return_column]).cumprod()
+    cumulative_peak = equity_curve.cummax()
+    drawdown = equity_curve / cumulative_peak.replace(0.0, np.nan) - 1.0
+    drawdown = drawdown.fillna(0.0)
+    curve = pd.DataFrame(
+        {
+            "date": frame["date"],
+            "equity_curve": equity_curve,
+            "cumulative_peak": cumulative_peak,
+            "drawdown": drawdown,
+        },
+        columns=DRAWDOWN_COLUMNS,
+    )
+    return DrawdownResult(
+        data=curve,
+        stats=_drawdown_stats(curve, return_column),
+    )
+
+
+def _drawdown_stats(curve: pd.DataFrame, return_column: str) -> dict[str, Any]:
+    trough_index = curve["drawdown"].idxmin()
+    max_drawdown = float(cast(float, curve.loc[trough_index, "drawdown"]))
+    peak_value_at_trough = cast(float, curve.loc[trough_index, "cumulative_peak"])
+    peak_candidates = curve.loc[:trough_index]
+    peak_index = peak_candidates[
+        peak_candidates["equity_curve"] == peak_value_at_trough
+    ].index[-1]
+
+    recovery_candidates = curve.loc[trough_index:]
+    recovered = recovery_candidates[
+        recovery_candidates["equity_curve"] >= peak_value_at_trough
+    ]
+    recovery_date = None if recovered.empty else _date_string(recovered.iloc[0]["date"])
+    negative_drawdowns = curve.loc[curve["drawdown"] < 0.0, "drawdown"]
+    average_drawdown = (
+        None
+        if negative_drawdowns.empty
+        else float(negative_drawdowns.mean())
+    )
+
+    end_equity = float(curve["equity_curve"].iloc[-1])
+    return {
+        "method": "cumulative_return",
+        "return_column": return_column,
+        "return_count": len(curve),
+        "start_equity": 1.0,
+        "end_equity": end_equity,
+        "total_return": end_equity - 1.0,
+        "max_drawdown": max_drawdown,
+        "max_drawdown_abs": abs(max_drawdown),
+        "peak_date": _date_string(curve.loc[peak_index, "date"]),
+        "trough_date": _date_string(curve.loc[trough_index, "date"]),
+        "recovery_date": recovery_date,
+        "drawdown_period_count": int((curve["drawdown"] < 0.0).sum()),
+        "average_drawdown": average_drawdown,
+    }
+
+
 def _backtest_stats(
     panel: pd.DataFrame,
     factor_column: str,
@@ -984,6 +1138,12 @@ def _json_safe_value(value: Any) -> Any:
     if isinstance(value, np.generic):
         return value.item()
     return value
+
+
+def _date_string(value: Any) -> str:
+    if isinstance(value, pd.Timestamp):
+        return value.date().isoformat()
+    return str(value)
 
 
 def _optional_path(payload: Mapping[str, Any], key: str) -> Path | None:
