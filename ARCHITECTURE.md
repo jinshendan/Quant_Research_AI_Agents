@@ -640,6 +640,64 @@ Day 14 deliberately uses CSV plus a small JSON manifest instead of introducing
 a factor database table yet. Week 3 BacktestAgent can now depend on a durable,
 lineage-tracked factor matrix without coupling itself to FeatureAgent internals.
 
+## Day 15 --- BacktestAgent
+
+Implemented in `quant-agent/`:
+
+-   backtest construction agent in `quant-agent/agents/backtest_agent.py`
+-   validated `BacktestSpec` request model
+-   loading of Day 14 factor manifests and factor matrices
+-   aligned OHLCV price loading from either explicit `payload.aligned_data_path`
+    or manifest `context.source_aligned_data_path`
+-   single-factor selection with explicit `payload.factor_column` required for
+    multi-factor matrices
+-   forward return construction from aligned `close` prices
+-   long/short factor portfolio return series by date
+-   support for `payload.factor_direction`, `payload.forward_return_days`, and
+    `payload.quantile_count`
+-   standardized `AgentRequest` and `AgentResponse` envelopes
+-   structured logs for validation and backtest construction
+-   tests for manifest-driven runs, input validation, factor selection, and
+    long/short return construction
+
+Current BacktestAgent payload:
+
+```json
+{
+  "factor_manifest_path": "factors/generated/csi500_short_horizon_task.manifest.json",
+  "factor_column": "factor__return_5d",
+  "factor_direction": "positive",
+  "forward_return_days": 1,
+  "quantile_count": 5,
+  "preview_rows": 5
+}
+```
+
+Current BacktestAgent output:
+
+```text
+state = backtest_built
+factor_matrix_path
+aligned_data_path
+factor_column
+portfolio_return_columns
+row_count
+usable_row_count
+portfolio_date_count
+preview
+backtest_stats
+```
+
+The portfolio return preview has:
+
+```text
+date, long_return, short_return, long_short_return, long_count, short_count
+```
+
+Day 15 intentionally stops at building the backtest return series and coverage
+statistics. IC, RankIC, Sharpe, drawdown, and result JSON generation remain
+scoped to Days 16-20.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

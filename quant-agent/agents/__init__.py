@@ -1,5 +1,6 @@
 """Agent implementations are added incrementally according to TASKS.md."""
 
+from agents.backtest_agent import BacktestAgent, BacktestBuildResult, BacktestSpec
 from agents.data_agent import DataAgent, MarketDataSpec
 from agents.duckdb_store import (
     DuckDBMarketDataStore,
@@ -61,6 +62,9 @@ from agents.trading_calendar import (
 __all__ = [
     "AkShareMarketDataProvider",
     "AkShareTradingCalendarProvider",
+    "BacktestAgent",
+    "BacktestBuildResult",
+    "BacktestSpec",
     "CalendarAlignmentResult",
     "DataAgent",
     "DuckDBMarketDataStore",

@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-14：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features 和 generated factor matrix 持久化。
+> 当前项目处于早期搭建阶段。已完成 Day 1-15：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化和 BacktestAgent 回测骨架。
 
 ## Why This Project
 
@@ -60,11 +60,12 @@ Implemented:
 - cross-sectional ranking transforms for factor matrices
 - per-symbol rolling-window feature transforms for factor matrices
 - file-backed factor matrix persistence with lineage manifests
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, and factor matrix persistence
+- `BacktestAgent` for consuming saved factor matrices and building long/short return series
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, and BacktestAgent behavior
 
 Not implemented yet:
 
-- backtesting
+- IC, RankIC, Sharpe, drawdown, and benchmark evaluation metrics
 - memory and report generation
 - Streamlit dashboard
 
@@ -79,6 +80,7 @@ Not implemented yet:
 └── quant-agent/
     ├── agents/
     │   ├── __init__.py
+    │   ├── backtest_agent.py
     │   ├── data_agent.py
     │   ├── duckdb_store.py
     │   ├── factor_generator.py
@@ -465,6 +467,38 @@ Generated factors are named `alpha_001` through `alpha_050` by default and
 include source template id, expression, direction, required columns, parameters,
 lookback window, signal tags, and risk flags.
 
+## BacktestAgent Example
+
+`BacktestAgent` consumes a saved factor matrix, resolves the aligned OHLCV
+source from the Day 14 manifest when available, computes forward returns from
+`close`, and builds a simple long/short factor return series. It deliberately
+does not compute IC, RankIC, Sharpe, or drawdown yet; those are Week 3 follow-up
+tasks.
+
+```python
+from agents.backtest_agent import BacktestAgent
+from core.models import AgentRequest
+
+request = AgentRequest.create(
+    {
+        "factor_manifest_path": "factors/generated/csi500_short_horizon_task.manifest.json",
+        "factor_column": "factor__return_5d",
+        "factor_direction": "positive",
+        "forward_return_days": 1,
+        "quantile_count": 5,
+        "preview_rows": 5,
+    }
+)
+
+response = BacktestAgent().run(request)
+print(response.output["preview"])
+print(response.output["backtest_stats"])
+```
+
+For a single-factor matrix, `factor_column` can be omitted. For multi-factor
+matrices, the request must choose one factor explicitly so the backtest remains
+reproducible.
+
 ## Configuration
 
 `AppConfig` reads optional environment variables:
@@ -502,8 +536,10 @@ Week 1:
 - Day 12: cross-sectional ranking transforms
 - Day 13: per-symbol rolling-window features
 - Day 14: generated factor matrix persistence
+- Day 15: BacktestAgent long/short return series
 
-Next steps cover backtesting, evaluation, memory, reporting, and dashboard.
+Next steps cover IC, RankIC, Sharpe, drawdown, result JSON, memory, reporting,
+and dashboard.
 
 ## Engineering Principles
 
