@@ -13,12 +13,12 @@ Current status:
 
 ## P0 --- Make Daily Research Usable
 
-- [ ] Stabilize real AkShare data ingestion
+- [x] Stabilize real AkShare data ingestion
   - [x] Add retry with exponential backoff for AkShare/Eastmoney requests
   - [x] Add per-symbol failure isolation
   - [x] Save failed symbols, error messages, and retry counts to a manifest
   - [x] Add a real AkShare smoke test that reports actionable diagnostics
-  - [ ] Add request throttling and configurable sleep between symbols
+  - [x] Add request throttling and configurable sleep between symbols
 
 - [ ] Add a daily research pipeline script
   - [ ] Create `scripts/run_daily_research.py`
@@ -131,10 +131,10 @@ Current status:
 
 ## Suggested Next Task
 
-Continue P0 data reliability:
+Continue P0 daily usability:
 
-1. Add request throttling and configurable sleep between symbols.
-2. Then build the daily research pipeline script.
+1. Build the daily research pipeline script.
+2. Then generate a practical daily stock ranking output.
 
 This is the most direct path from the current offline MVP to useful daily
 self-directed trading research.

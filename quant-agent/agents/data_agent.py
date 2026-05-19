@@ -4,7 +4,7 @@ import copy
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -44,8 +44,10 @@ SUPPORTED_PROVIDERS = {"akshare"}
 SUPPORTED_ADJUSTMENTS = {"", "qfq", "hfq"}
 DEFAULT_DOWNLOAD_MAX_RETRIES = 2
 DEFAULT_DOWNLOAD_RETRY_BACKOFF_SEC = 0.5
+DEFAULT_SYMBOL_SLEEP_SEC = 0.0
 MAX_DOWNLOAD_RETRIES = 5
 MAX_DOWNLOAD_RETRY_BACKOFF_SEC = 60.0
+MAX_SYMBOL_SLEEP_SEC = 60.0
 DOWNLOAD_FAILURE_MANIFEST_SCHEMA_VERSION = 1
 
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -66,6 +68,7 @@ class MarketDataSpec:
     force_refresh: bool = False
     max_retries: int = DEFAULT_DOWNLOAD_MAX_RETRIES
     retry_backoff_sec: float = DEFAULT_DOWNLOAD_RETRY_BACKOFF_SEC
+    symbol_sleep_sec: float = DEFAULT_SYMBOL_SLEEP_SEC
     continue_on_symbol_error: bool = True
 
     @classmethod
@@ -92,6 +95,13 @@ class MarketDataSpec:
             DEFAULT_DOWNLOAD_RETRY_BACKOFF_SEC,
             minimum=0.0,
             maximum=MAX_DOWNLOAD_RETRY_BACKOFF_SEC,
+        )
+        symbol_sleep_sec = _optional_float(
+            payload,
+            "symbol_sleep_sec",
+            DEFAULT_SYMBOL_SLEEP_SEC,
+            minimum=0.0,
+            maximum=MAX_SYMBOL_SLEEP_SEC,
         )
         continue_on_symbol_error = _optional_bool(
             payload,
@@ -124,6 +134,7 @@ class MarketDataSpec:
             force_refresh=force_refresh,
             max_retries=max_retries,
             retry_backoff_sec=retry_backoff_sec,
+            symbol_sleep_sec=symbol_sleep_sec,
             continue_on_symbol_error=continue_on_symbol_error,
         )
 
@@ -140,6 +151,7 @@ class MarketDataSpec:
             "force_refresh": self.force_refresh,
             "max_retries": self.max_retries,
             "retry_backoff_sec": self.retry_backoff_sec,
+            "symbol_sleep_sec": self.symbol_sleep_sec,
             "continue_on_symbol_error": self.continue_on_symbol_error,
         }
 
@@ -171,6 +183,8 @@ class OhlcvDownloadResult:
     successful_symbols: tuple[str, ...]
     failures: tuple[SymbolDownloadFailure, ...]
     retry_attempts: int = 0
+    symbol_sleep_events: int = 0
+    symbol_sleep_total_sec: float = 0.0
 
     @property
     def failed_symbols(self) -> tuple[str, ...]:
@@ -185,6 +199,8 @@ class OhlcvDownloadResult:
             "successful_symbols": list(self.successful_symbols),
             "failed_symbols": list(self.failed_symbols),
             "retry_attempts": self.retry_attempts,
+            "symbol_sleep_events": self.symbol_sleep_events,
+            "symbol_sleep_total_sec": self.symbol_sleep_total_sec,
             "failures": [failure.to_dict() for failure in self.failures],
         }
 
@@ -203,6 +219,7 @@ class DataAgent:
         calendar_providers: Mapping[str, TradingCalendarProvider] | None = None,
         market_data_store: DuckDBMarketDataStore | None = None,
         market_data_cache: MarketDataCache | None = None,
+        sleep_func: Callable[[float], None] = sleep,
     ) -> None:
         self.config = config or AppConfig.from_env()
         self.logger = logger or get_agent_logger(self.name)
@@ -216,6 +233,7 @@ class DataAgent:
         )
         self.market_data_store = market_data_store or DuckDBMarketDataStore(self.config.duckdb_path)
         self.market_data_cache = market_data_cache or MarketDataCache(self.config.cache_dir)
+        self.sleep_func = sleep_func
 
     def run(self, request: AgentRequest) -> AgentResponse:
         started_at = perf_counter()
@@ -464,7 +482,9 @@ class DataAgent:
         successful_symbols: list[str] = []
         failures: list[SymbolDownloadFailure] = []
         retry_attempts = 0
-        for symbol in selected_symbols:
+        symbol_sleep_events = 0
+        symbol_sleep_total_sec = 0.0
+        for index, symbol in enumerate(selected_symbols):
             frame, failure, attempts = self._download_symbol_with_retries(
                 spec,
                 symbol=symbol,
@@ -483,6 +503,15 @@ class DataAgent:
             if frame is not None:
                 frames.append(frame)
                 successful_symbols.append(symbol)
+            if index < len(selected_symbols) - 1:
+                slept_sec = self._sleep_between_symbols(
+                    spec,
+                    current_symbol=symbol,
+                    next_symbol=selected_symbols[index + 1],
+                )
+                if slept_sec > 0:
+                    symbol_sleep_events += 1
+                    symbol_sleep_total_sec += slept_sec
 
         if failures:
             self.logger.warning(
@@ -510,6 +539,8 @@ class DataAgent:
             successful_symbols=tuple(successful_symbols),
             failures=tuple(failures),
             retry_attempts=retry_attempts,
+            symbol_sleep_events=symbol_sleep_events,
+            symbol_sleep_total_sec=symbol_sleep_total_sec,
         )
 
     def save_download_failure_manifest(
@@ -575,7 +606,7 @@ class DataAgent:
                     )
                     backoff = spec.retry_backoff_sec * (2 ** (attempt - 1))
                     if backoff > 0:
-                        sleep(backoff)
+                        self.sleep_func(backoff)
                     continue
                 break
             else:
@@ -605,6 +636,26 @@ class DataAgent:
             extra={"action": "download_symbol_ohlcv", "status": "failed"},
         )
         return None, failure, max_attempts
+
+    def _sleep_between_symbols(
+        self,
+        spec: MarketDataSpec,
+        *,
+        current_symbol: str,
+        next_symbol: str,
+    ) -> float:
+        if spec.symbol_sleep_sec <= 0:
+            return 0.0
+
+        self.logger.info(
+            (
+                f"Sleeping {spec.symbol_sleep_sec:.3f}s before next OHLCV "
+                f"download: {current_symbol} -> {next_symbol}."
+            ),
+            extra={"action": "download_symbol_ohlcv", "status": "throttled"},
+        )
+        self.sleep_func(spec.symbol_sleep_sec)
+        return spec.symbol_sleep_sec
 
     def save_raw_ohlcv(self, market_data: pd.DataFrame, spec: MarketDataSpec) -> Path:
         output_path = self._raw_ohlcv_path(spec)

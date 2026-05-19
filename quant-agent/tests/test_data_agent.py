@@ -102,6 +102,7 @@ def test_market_data_spec_normalizes_valid_payload() -> None:
         "force_refresh": False,
         "max_retries": 2,
         "retry_backoff_sec": 0.5,
+        "symbol_sleep_sec": 0.0,
         "continue_on_symbol_error": True,
     }
 
@@ -125,6 +126,18 @@ def test_market_data_spec_rejects_invalid_symbols() -> None:
                 "start_date": "2020-01-01",
                 "end_date": "2025-12-31",
                 "symbols": ["BAD"],
+            }
+        )
+
+
+def test_market_data_spec_rejects_invalid_symbol_sleep() -> None:
+    with pytest.raises(ValueError, match="symbol_sleep_sec"):
+        MarketDataSpec.from_payload(
+            {
+                "universe": "CSI500",
+                "start_date": "2020-01-01",
+                "end_date": "2025-12-31",
+                "symbol_sleep_sec": -0.1,
             }
         )
 
@@ -340,6 +353,42 @@ def test_data_agent_retries_transient_symbol_failure(tmp_path: Path) -> None:
     assert response.output["failure_manifest_path"] is None
     assert "DataAgent | download_symbol_ohlcv | retry" in stream.getvalue()
     assert "DataAgent | download_symbol_ohlcv | recovered" in stream.getvalue()
+
+
+def test_data_agent_throttles_between_symbol_downloads(tmp_path: Path) -> None:
+    stream = StringIO()
+    configure_logging(stream=stream)
+    sleep_calls: list[float] = []
+    provider = FakeMarketDataProvider()
+    agent = DataAgent(
+        config=_config(tmp_path),
+        logger=get_agent_logger("DataAgent"),
+        providers={"akshare": provider},
+        calendar_providers={"akshare": FakeTradingCalendarProvider()},
+        sleep_func=sleep_calls.append,
+    )
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "universe": "custom_batch",
+                "symbols": ["000001", "000002", "000003"],
+                "start_date": "2020-01-01",
+                "end_date": "2025-12-31",
+                "symbol_sleep_sec": 0.25,
+                "use_cache": False,
+            },
+            task_id="data-throttle-1",
+        )
+    )
+
+    assert response.status == "success"
+    assert provider.download_calls == 3
+    assert sleep_calls == [0.25, 0.25]
+    assert response.output["download_stats"]["symbol_sleep_events"] == 2
+    assert response.output["download_stats"]["symbol_sleep_total_sec"] == 0.5
+    assert response.output["request"]["symbol_sleep_sec"] == 0.25
+    assert "DataAgent | download_symbol_ohlcv | throttled" in stream.getvalue()
 
 
 def test_data_agent_isolates_failed_symbols_and_writes_manifest(

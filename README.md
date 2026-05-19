@@ -37,7 +37,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | 交易日历对齐 | 已实现 | 生成 symbol/date 网格，标记缺失或停牌 |
 | DuckDB 持久化 | 已实现 | 保存 aligned OHLCV 和运行元数据 |
 | 市场数据缓存 | 已实现 | 文件缓存、cache hit、force refresh、stale artifact 检查 |
-| 数据可靠性 | 已实现部分 | 单票重试、部分失败隔离、失败 manifest、AkShare smoke diagnostic |
+| 数据可靠性 | 已实现 | 单票重试、symbol 间 sleep、部分失败隔离、失败 manifest、AkShare smoke diagnostic |
 | HypothesisAgent | 已实现 | 生成结构化 alpha 假设 |
 | 因子模板库 | 已实现 | 动量、反转、波动率、流动性、突破等模板 |
 | FeatureAgent | 已实现 | 计算因子矩阵、ranking transform、rolling feature |
@@ -124,6 +124,7 @@ python scripts/run_akshare_smoke.py \
   --symbol 000001 \
   --start-date 2024-01-02 \
   --end-date 2024-01-03 \
+  --symbol-sleep-sec 0.2 \
   --output /tmp/akshare-smoke.json
 ```
 
@@ -166,6 +167,7 @@ request = AgentRequest.create(
         "frequency": "daily",
         "max_retries": 2,
         "retry_backoff_sec": 0.5,
+        "symbol_sleep_sec": 0.2,
         "continue_on_symbol_error": True,
     }
 )
@@ -288,7 +290,7 @@ print(report_response.output["report_path"])
 
 | 优先级 | 计划 |
 | --- | --- |
-| P0 | 完善 AkShare 请求限流、构建每日研究 pipeline、生成每日候选股票排名 |
+| P0 | 构建每日研究 pipeline、生成每日候选股票排名 |
 | P0 | 加入 A 股交易约束：T+1、涨跌停、ST、停牌、新股、退市风险 |
 | P0 | 加入交易成本：佣金、印花税、过户费、滑点和换手惩罚 |
 | P1 | 加入样本外验证、walk-forward validation、因子稳健性检查 |
@@ -335,7 +337,7 @@ for real-money trading decisions.
 | Trading calendar alignment | Done | Symbol/date grid with missing or suspended flags |
 | DuckDB storage | Done | Aligned OHLCV and run metadata |
 | Market data cache | Done | File cache, cache hit, force refresh, stale artifact checks |
-| Data reliability | Partly done | Retry, partial success, failure manifest, AkShare smoke diagnostics |
+| Data reliability | Done | Retry, symbol sleep, partial success, failure manifest, AkShare smoke diagnostics |
 | HypothesisAgent | Done | Structured alpha hypotheses |
 | Factor templates | Done | Momentum, reversal, volatility, liquidity, breakout templates |
 | FeatureAgent | Done | Factor matrices, ranking transforms, rolling features |
@@ -397,6 +399,7 @@ python scripts/run_akshare_smoke.py \
   --symbol 000001 \
   --start-date 2024-01-02 \
   --end-date 2024-01-03 \
+  --symbol-sleep-sec 0.2 \
   --output /tmp/akshare-smoke.json
 ```
 
@@ -438,6 +441,7 @@ request = AgentRequest.create(
         "frequency": "daily",
         "max_retries": 2,
         "retry_backoff_sec": 0.5,
+        "symbol_sleep_sec": 0.2,
         "continue_on_symbol_error": True,
     }
 )
@@ -509,7 +513,6 @@ print(response.output["benchmark_status"])
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- add provider throttling and configurable sleep between symbols
 - build a daily research pipeline script
 - generate practical daily stock ranking output
 - add A-share trading constraints such as T+1, limit up/down, ST, suspension,

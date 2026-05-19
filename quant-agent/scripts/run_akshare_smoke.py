@@ -39,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         adjust=args.adjust,
         max_retries=args.max_retries,
         retry_backoff_sec=args.retry_backoff_sec,
+        symbol_sleep_sec=args.symbol_sleep_sec,
         timeout_sec=args.timeout_sec,
         task_id=args.task_id,
     )
@@ -96,6 +97,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--adjust", default="")
     parser.add_argument("--max-retries", type=int, default=2)
     parser.add_argument("--retry-backoff-sec", type=float, default=0.5)
+    parser.add_argument("--symbol-sleep-sec", type=float, default=0.0)
     parser.add_argument("--timeout-sec", type=float, default=15.0)
     parser.add_argument("--task-id", default="akshare-smoke")
     return parser

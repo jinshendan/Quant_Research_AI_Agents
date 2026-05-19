@@ -31,6 +31,7 @@ class AkShareSmokeSpec:
     adjust: str = ""
     max_retries: int = 2
     retry_backoff_sec: float = 0.5
+    symbol_sleep_sec: float = 0.0
     timeout_sec: float = 15.0
     task_id: str = "akshare-smoke"
 
@@ -47,6 +48,7 @@ class AkShareSmokeSpec:
             "force_refresh": True,
             "max_retries": self.max_retries,
             "retry_backoff_sec": self.retry_backoff_sec,
+            "symbol_sleep_sec": self.symbol_sleep_sec,
             "continue_on_symbol_error": True,
         }
 
@@ -278,6 +280,7 @@ def _configuration_diagnostic(
             "end_date": spec.end_date.isoformat(),
             "max_retries": spec.max_retries,
             "retry_backoff_sec": spec.retry_backoff_sec,
+            "symbol_sleep_sec": spec.symbol_sleep_sec,
             "timeout_sec": spec.timeout_sec,
         },
     )
