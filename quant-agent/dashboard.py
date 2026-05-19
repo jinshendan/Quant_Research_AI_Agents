@@ -31,6 +31,15 @@ FACTOR_RANKING_COLUMNS = [
     "failure_reason",
     "created_at",
 ]
+EXPLORER_PERFORMANCE_FIELDS = (
+    "ic",
+    "rank_ic",
+    "sharpe",
+    "max_drawdown",
+    "max_drawdown_abs",
+    "total_return",
+    "turnover",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +73,56 @@ class MarkdownReportSummary:
             "title": self.title,
             "byte_count": self.byte_count,
             "modified_time": self.modified_time,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FactorExplorerOption:
+    """Selectable factor memory record in the dashboard explorer."""
+
+    label: str
+    factor_name: str
+    memory_id: str
+    created_at: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "label": self.label,
+            "factor_name": self.factor_name,
+            "memory_id": self.memory_id,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FactorExplorerView:
+    """Detailed factor view for a selected memory record."""
+
+    factor_name: str
+    memory_id: str
+    title: str
+    overview: dict[str, str]
+    performance: dict[str, float | None]
+    benchmark: dict[str, Any]
+    diagnostics: dict[str, Any]
+    artifacts: dict[str, str]
+    report_summary: MarkdownReportSummary | None
+    raw_record: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "factor_name": self.factor_name,
+            "memory_id": self.memory_id,
+            "title": self.title,
+            "overview": dict(self.overview),
+            "performance": dict(self.performance),
+            "benchmark": dict(self.benchmark),
+            "diagnostics": dict(self.diagnostics),
+            "artifacts": dict(self.artifacts),
+            "report_summary": (
+                self.report_summary.to_dict() if self.report_summary is not None else None
+            ),
+            "raw_record": dict(self.raw_record),
         }
 
 
@@ -202,6 +261,126 @@ def build_metric_distribution_frame(
     return pd.DataFrame(rows, columns=["bucket", "count"])
 
 
+def build_factor_explorer_options(
+    records: Sequence[Mapping[str, Any]],
+) -> list[FactorExplorerOption]:
+    """Build deterministic factor explorer choices from memory records."""
+
+    options = []
+    for record in records:
+        factor_name = _factor_name(record)
+        memory_id = _text_or_na(record.get("memory_id"))
+        created_at = _text_or_na(record.get("created_at"))
+        options.append(
+            FactorExplorerOption(
+                label=f"{factor_name} | {memory_id} | {created_at}",
+                factor_name=factor_name,
+                memory_id=memory_id,
+                created_at=created_at,
+            )
+        )
+    return sorted(
+        options,
+        key=lambda option: (option.factor_name.lower(), option.created_at, option.memory_id),
+    )
+
+
+def select_factor_record(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    memory_id: str | None = None,
+    factor_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Select a factor memory record for the explorer."""
+
+    if memory_id is not None:
+        for record in records:
+            if _text_or_na(record.get("memory_id")) == memory_id:
+                return dict(record)
+        return None
+
+    if factor_name is not None:
+        matches = [
+            record
+            for record in records
+            if _factor_name(record).lower() == factor_name.lower()
+        ]
+        if not matches:
+            return None
+        return dict(sorted(matches, key=_record_sort_key)[-1])
+
+    return dict(sorted(records, key=_record_sort_key)[-1]) if records else None
+
+
+def build_factor_explorer_view(
+    record: Mapping[str, Any],
+    *,
+    report_summaries: Sequence[MarkdownReportSummary] = (),
+) -> FactorExplorerView:
+    """Build detail sections for one selected factor memory record."""
+
+    factor = _mapping(record.get("factor"))
+    performance = _mapping(record.get("performance"))
+    benchmark = _mapping(record.get("benchmark"))
+    diagnostics = _mapping(record.get("diagnostics"))
+    artifacts = _mapping(record.get("artifacts"))
+    source = _mapping(record.get("source"))
+    factor_name = _factor_name(record)
+    memory_id = _text_or_na(record.get("memory_id"))
+    return FactorExplorerView(
+        factor_name=factor_name,
+        memory_id=memory_id,
+        title=f"{factor_name} ({memory_id})",
+        overview={
+            "formula": _text_or_na(factor.get("formula")),
+            "hypothesis": _text_or_na(factor.get("hypothesis")),
+            "direction": _text_or_na(factor.get("direction")),
+            "universe": _text_or_na(factor.get("universe")),
+            "forward_return_days": _text_or_na(factor.get("forward_return_days")),
+            "source_agent": _text_or_na(source.get("agent")),
+            "source_task_id": _text_or_na(source.get("task_id")),
+            "created_at": _text_or_na(record.get("created_at")),
+        },
+        performance={
+            field: _to_float(performance.get(field))
+            for field in EXPLORER_PERFORMANCE_FIELDS
+        },
+        benchmark=dict(benchmark),
+        diagnostics=dict(diagnostics),
+        artifacts={
+            key: _text_or_na(value)
+            for key, value in artifacts.items()
+        },
+        report_summary=match_report_summary(record, report_summaries),
+        raw_record=dict(record),
+    )
+
+
+def match_report_summary(
+    record: Mapping[str, Any],
+    report_summaries: Sequence[MarkdownReportSummary],
+) -> MarkdownReportSummary | None:
+    """Find the most relevant generated report for a factor memory record."""
+
+    if not report_summaries:
+        return None
+
+    memory_id = _text_or_na(record.get("memory_id")).lower()
+    factor_name = _factor_name(record).lower()
+    scored_reports = [
+        (_report_match_score(report, factor_name=factor_name, memory_id=memory_id), report)
+        for report in report_summaries
+    ]
+    scored_reports = [(score, report) for score, report in scored_reports if score > 0]
+    if not scored_reports:
+        return None
+    return sorted(
+        scored_reports,
+        key=lambda item: (item[0], item[1].modified_time),
+        reverse=True,
+    )[0][1]
+
+
 def render_streamlit_dashboard(
     *,
     config: AppConfig | None = None,
@@ -219,6 +398,7 @@ def render_streamlit_dashboard(
     ranking_frame = build_factor_ranking_frame(data.records)
     ic_distribution = build_metric_distribution_frame(data.records, "ic")
     sharpe_distribution = build_metric_distribution_frame(data.records, "sharpe")
+    explorer_options = build_factor_explorer_options(data.records)
 
     dashboard_logger.info(
         "Rendering dashboard.",
@@ -236,36 +416,64 @@ def render_streamlit_dashboard(
         st.caption("Reports")
         st.code(str(paths.report_dir))
 
-    metric_columns = st.columns(5)
-    metric_columns[0].metric("Records", summary["record_count"])
-    metric_columns[1].metric("Factors", summary["factor_count"])
-    metric_columns[2].metric("Passed", summary["passed_count"])
-    metric_columns[3].metric("Failed", summary["failed_count"])
-    metric_columns[4].metric("Reports", summary["report_count"])
+    dashboard_tab, explorer_tab = st.tabs(["Dashboard", "Factor Explorer"])
 
-    st.subheader("Factor Ranking")
-    if ranking_frame.empty:
-        st.info("No factor memory records found.")
-    else:
-        st.dataframe(ranking_frame, use_container_width=True, hide_index=True)
+    with dashboard_tab:
+        metric_columns = st.columns(5)
+        metric_columns[0].metric("Records", summary["record_count"])
+        metric_columns[1].metric("Factors", summary["factor_count"])
+        metric_columns[2].metric("Passed", summary["passed_count"])
+        metric_columns[3].metric("Failed", summary["failed_count"])
+        metric_columns[4].metric("Reports", summary["report_count"])
 
-    chart_columns = st.columns(2)
-    with chart_columns[0]:
-        st.subheader("IC Distribution")
-        _render_distribution_chart(st, ic_distribution)
-    with chart_columns[1]:
-        st.subheader("Sharpe Distribution")
-        _render_distribution_chart(st, sharpe_distribution)
+        st.subheader("Factor Ranking")
+        if ranking_frame.empty:
+            st.info("No factor memory records found.")
+        else:
+            st.dataframe(ranking_frame, use_container_width=True, hide_index=True)
 
-    st.subheader("Generated Reports")
-    report_frame = pd.DataFrame(
-        [report.to_dict() for report in data.report_summaries],
-        columns=["title", "path", "byte_count", "modified_time"],
-    )
-    if report_frame.empty:
-        st.info("No markdown reports found.")
-    else:
-        st.dataframe(report_frame, use_container_width=True, hide_index=True)
+        chart_columns = st.columns(2)
+        with chart_columns[0]:
+            st.subheader("IC Distribution")
+            _render_distribution_chart(st, ic_distribution)
+        with chart_columns[1]:
+            st.subheader("Sharpe Distribution")
+            _render_distribution_chart(st, sharpe_distribution)
+
+        st.subheader("Generated Reports")
+        report_frame = pd.DataFrame(
+            [report.to_dict() for report in data.report_summaries],
+            columns=["title", "path", "byte_count", "modified_time"],
+        )
+        if report_frame.empty:
+            st.info("No markdown reports found.")
+        else:
+            st.dataframe(report_frame, use_container_width=True, hide_index=True)
+
+    with explorer_tab:
+        st.subheader("Factor Explorer")
+        if not explorer_options:
+            st.info("No factor memory records found.")
+        else:
+            selected_label = st.selectbox(
+                "Factor memory record",
+                [option.label for option in explorer_options],
+            )
+            selected_option = next(
+                option for option in explorer_options if option.label == selected_label
+            )
+            selected_record = select_factor_record(
+                data.records,
+                memory_id=selected_option.memory_id,
+            )
+            if selected_record is None:
+                st.warning("Selected factor memory record is no longer available.")
+            else:
+                explorer_view = build_factor_explorer_view(
+                    selected_record,
+                    report_summaries=data.report_summaries,
+                )
+                _render_factor_explorer(st, explorer_view)
 
     dashboard_logger.info(
         "Rendered dashboard.",
@@ -282,6 +490,53 @@ def _render_distribution_chart(st: Any, distribution_frame: pd.DataFrame) -> Non
         st.info("No numeric metric values found.")
         return
     st.bar_chart(distribution_frame.set_index("bucket")["count"])
+
+
+def _render_factor_explorer(st: Any, view: FactorExplorerView) -> None:
+    st.markdown(f"### {view.title}")
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("RankIC", _format_optional_float(view.performance["rank_ic"]))
+    metric_columns[1].metric("IC", _format_optional_float(view.performance["ic"]))
+    metric_columns[2].metric("Sharpe", _format_optional_float(view.performance["sharpe"]))
+    metric_columns[3].metric(
+        "Max Drawdown",
+        _format_optional_float(view.performance["max_drawdown"]),
+    )
+
+    st.markdown("#### Overview")
+    st.table(_section_frame(view.overview))
+
+    detail_columns = st.columns(2)
+    with detail_columns[0]:
+        st.markdown("#### Performance")
+        st.table(_section_frame(view.performance))
+        st.markdown("#### Benchmark")
+        st.table(_section_frame(view.benchmark))
+    with detail_columns[1]:
+        st.markdown("#### Diagnostics")
+        st.table(_section_frame(view.diagnostics))
+        st.markdown("#### Artifacts")
+        st.table(_section_frame(view.artifacts))
+
+    st.markdown("#### Report")
+    if view.report_summary is None:
+        st.info("No generated report matched this factor.")
+    else:
+        st.table(_section_frame(view.report_summary.to_dict()))
+
+    with st.expander("Raw memory record"):
+        st.json(view.raw_record)
+
+
+def _section_frame(section: Mapping[str, Any]) -> pd.DataFrame:
+    rows = [
+        {
+            "field": str(key),
+            "value": _format_display_value(value),
+        }
+        for key, value in section.items()
+    ]
+    return pd.DataFrame(rows, columns=["field", "value"])
 
 
 def _factor_ranking_row(record: Mapping[str, Any]) -> dict[str, Any]:
@@ -302,6 +557,19 @@ def _factor_ranking_row(record: Mapping[str, Any]) -> dict[str, Any]:
         "failure_reason": _text_or_na(diagnostics.get("failure_reason")),
         "created_at": _text_or_na(record.get("created_at")),
     }
+
+
+def _record_sort_key(record: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        _factor_name(record).lower(),
+        _text_or_na(record.get("created_at")),
+        _text_or_na(record.get("memory_id")),
+    )
+
+
+def _factor_name(record: Mapping[str, Any]) -> str:
+    factor = _mapping(record.get("factor"))
+    return _text_or_na(factor.get("name"))
 
 
 def _metric_value(record: Mapping[str, Any], metric: str) -> float | None:
@@ -331,6 +599,38 @@ def _to_float(value: Any) -> float | None:
 
 def _format_float(value: float) -> str:
     return f"{value:.4g}"
+
+
+def _format_optional_float(value: float | None) -> str:
+    return _format_float(value) if value is not None else "N/A"
+
+
+def _format_display_value(value: Any) -> str:
+    if isinstance(value, float):
+        return _format_float(value)
+    if isinstance(value, Mapping):
+        return ", ".join(
+            f"{key}={_format_display_value(item)}" for key, item in value.items()
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        rendered = [_format_display_value(item) for item in value]
+        return ", ".join(rendered) if rendered else "N/A"
+    return _text_or_na(value)
+
+
+def _report_match_score(
+    report: MarkdownReportSummary,
+    *,
+    factor_name: str,
+    memory_id: str,
+) -> int:
+    haystack = f"{report.title} {report.path.stem} {report.path}".lower()
+    score = 0
+    if memory_id != "n/a" and memory_id in haystack:
+        score += 2
+    if factor_name != "n/a" and factor_name in haystack:
+        score += 1
+    return score
 
 
 def _extract_markdown_title(markdown: str) -> str | None:

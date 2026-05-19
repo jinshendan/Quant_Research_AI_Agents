@@ -1193,8 +1193,36 @@ Sharpe Distribution
 Generated Reports
 ```
 
-Day 27 intentionally stops at the overview dashboard. Factor Explorer remains
-scoped to Day 28, and semantic search UI remains scoped to Day 29.
+Day 27 introduced the overview dashboard. Factor Explorer is implemented in
+Day 28, and semantic search UI remains scoped to Day 29.
+
+## Day 28 --- Factor Explorer
+
+Implemented in `quant-agent/`:
+
+-   `FactorExplorerOption` for deterministic factor memory record selections
+-   `FactorExplorerView` for one selected factor's overview, performance,
+    benchmark, diagnostics, artifacts, matched report, and raw memory record
+-   `build_factor_explorer_options(...)` for Streamlit selectbox choices
+-   `select_factor_record(...)` with exact memory ID selection and latest-record
+    selection by factor name
+-   `build_factor_explorer_view(...)` for detail rendering without coupling to
+    Streamlit
+-   `match_report_summary(...)` for linking generated Markdown reports to the
+    selected factor
+-   a `Factor Explorer` tab in `dashboard.py`
+-   tests for deterministic options, selector behavior, detail view contents,
+    and report matching
+
+Current dashboard tabs:
+
+```text
+Dashboard
+Factor Explorer
+```
+
+The Factor Explorer intentionally uses existing memory and report artifacts.
+It does not perform semantic retrieval; that remains scoped to Day 29.
 
 ------------------------------------------------------------------------
 

@@ -5,12 +5,17 @@ from pathlib import Path
 from agents.memory_agent import FactorMemoryStore
 from core.config import AppConfig
 from dashboard import (
+    MarkdownReportSummary,
     build_dashboard_summary,
+    build_factor_explorer_options,
+    build_factor_explorer_view,
     build_factor_ranking_frame,
     build_metric_distribution_frame,
     default_dashboard_paths,
     load_dashboard_data,
     load_markdown_report_summaries,
+    match_report_summary,
+    select_factor_record,
 )
 
 
@@ -144,6 +149,97 @@ def test_build_factor_ranking_frame_sorts_by_rank_ic_then_sharpe() -> None:
     assert frame["factor_name"].tolist() == ["alpha_tie", "alpha_high", "alpha_low"]
     assert frame["rank_ic"].tolist() == [0.08, 0.08, 0.02]
     assert frame["sharpe"].tolist() == [1.5, 0.5, 2.0]
+
+
+def test_build_factor_explorer_options_are_deterministic() -> None:
+    records = [
+        _memory_record("memory-2", name="alpha_b", ic=0.02, rank_ic=0.03, sharpe=1.2),
+        _memory_record("memory-1", name="alpha_a", ic=0.01, rank_ic=0.02, sharpe=1.0),
+    ]
+
+    options = build_factor_explorer_options(records)
+
+    assert [option.factor_name for option in options] == ["alpha_a", "alpha_b"]
+    assert options[0].to_dict() == {
+        "label": "alpha_a | memory-1 | 2026-05-19T10:01:00+00:00",
+        "factor_name": "alpha_a",
+        "memory_id": "memory-1",
+        "created_at": "2026-05-19T10:01:00+00:00",
+    }
+
+
+def test_select_factor_record_supports_memory_id_and_latest_factor_name() -> None:
+    records = [
+        _memory_record("memory-1", name="alpha_a", ic=0.01, rank_ic=0.02, sharpe=1.0),
+        _memory_record("memory-2", name="alpha_a", ic=0.03, rank_ic=0.06, sharpe=1.5),
+        _memory_record("memory-3", name="alpha_b", ic=0.02, rank_ic=0.04, sharpe=1.1),
+    ]
+
+    selected_by_id = select_factor_record(records, memory_id="memory-1")
+    selected_latest = select_factor_record(records, factor_name="ALPHA_A")
+    missing = select_factor_record(records, memory_id="missing")
+
+    assert selected_by_id is not None
+    assert selected_by_id["memory_id"] == "memory-1"
+    assert selected_latest is not None
+    assert selected_latest["memory_id"] == "memory-2"
+    assert missing is None
+
+
+def test_build_factor_explorer_view_includes_sections_and_matched_report(
+    tmp_path: Path,
+) -> None:
+    record = _memory_record(
+        "memory-1",
+        name="alpha_momentum",
+        ic=0.03,
+        rank_ic=0.05,
+        sharpe=1.2,
+    )
+    report = MarkdownReportSummary(
+        path=tmp_path / "alpha_momentum_memory-1.md",
+        title="Research Report: alpha_momentum",
+        byte_count=128,
+        modified_time=1.0,
+    )
+
+    view = build_factor_explorer_view(record, report_summaries=[report])
+
+    assert view.factor_name == "alpha_momentum"
+    assert view.memory_id == "memory-1"
+    assert view.overview["formula"] == "rank(close)"
+    assert view.performance["rank_ic"] == 0.05
+    assert view.benchmark["status"] == "passed"
+    assert view.diagnostics["market_condition"] == "unit-test"
+    assert view.artifacts["result_json_path"] == "/tmp/result.json"
+    assert view.report_summary == report
+    assert view.to_dict()["report_summary"]["title"] == "Research Report: alpha_momentum"
+
+
+def test_match_report_summary_prefers_memory_id_match(tmp_path: Path) -> None:
+    record = _memory_record(
+        "memory-2",
+        name="alpha_momentum",
+        ic=0.03,
+        rank_ic=0.05,
+        sharpe=1.2,
+    )
+    factor_only_report = MarkdownReportSummary(
+        path=tmp_path / "alpha_momentum.md",
+        title="Research Report: alpha_momentum",
+        byte_count=100,
+        modified_time=2.0,
+    )
+    memory_report = MarkdownReportSummary(
+        path=tmp_path / "alpha_momentum_memory-2.md",
+        title="Research Report: alpha_momentum",
+        byte_count=100,
+        modified_time=1.0,
+    )
+
+    matched = match_report_summary(record, [factor_only_report, memory_report])
+
+    assert matched == memory_report
 
 
 def test_build_metric_distribution_frame_handles_empty_and_constant_values() -> None:
