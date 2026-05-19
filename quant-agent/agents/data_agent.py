@@ -491,7 +491,17 @@ class DataAgent:
             )
         if not frames:
             failed_symbols = ", ".join(failure.symbol for failure in failures) or "none"
-            msg = f"No OHLCV data downloaded. Failed symbols: {failed_symbols}."
+            failure_details = "; ".join(
+                (
+                    f"{failure.symbol}: {failure.error_type}: "
+                    f"{failure.error_message}"
+                )
+                for failure in failures
+            )
+            msg = (
+                f"No OHLCV data downloaded. Failed symbols: {failed_symbols}. "
+                f"Errors: {failure_details}."
+            )
             raise RuntimeError(msg)
 
         return OhlcvDownloadResult(
@@ -588,7 +598,10 @@ class DataAgent:
             error_message=str(last_exc),
         )
         self.logger.warning(
-            f"OHLCV download failed for {symbol}.",
+            (
+                f"OHLCV download failed for {symbol}: "
+                f"{failure.error_type}: {failure.error_message}"
+            ),
             extra={"action": "download_symbol_ohlcv", "status": "failed"},
         )
         return None, failure, max_attempts

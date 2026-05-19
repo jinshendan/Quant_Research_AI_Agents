@@ -416,6 +416,7 @@ def test_data_agent_returns_error_when_all_symbols_fail(tmp_path: Path) -> None:
     assert "No OHLCV data downloaded" in str(response.error)
     assert "000001" in str(response.error)
     assert "000002" in str(response.error)
+    assert "RuntimeError: transient provider failure for 000001" in str(response.error)
 
 
 class FlakyMarketDataProvider(FakeMarketDataProvider):

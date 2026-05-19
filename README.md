@@ -54,6 +54,7 @@ Implemented:
 - DuckDB persistence for aligned OHLCV and run metadata
 - file-backed market data cache with cache-hit and force-refresh behavior
 - per-symbol market data retry, partial-success handling, and failed-symbol manifests
+- real AkShare diagnostic smoke test with JSON output and actionable suggestions
 - `HypothesisAgent` for structured alpha hypothesis generation
 - symbolic factor template library for Day 10 feature computation
 - `FeatureAgent` for computing template-based factor values from aligned OHLCV data
@@ -82,7 +83,6 @@ Implemented:
 Not implemented yet:
 
 - production live-data orchestration
-- real AkShare diagnostic smoke test
 - provider request throttling for larger daily universes
 
 ## Project Structure
@@ -137,6 +137,8 @@ Not implemented yet:
     ├── research_logs/
     │   └── *.md
     ├── prompts/
+    ├── scripts/
+    │   └── run_akshare_smoke.py
     ├── skills/
     ├── tests/
     ├── app.py
@@ -186,6 +188,22 @@ Run the application smoke test:
 ```bash
 python app.py
 ```
+
+Run a real AkShare diagnostic smoke test:
+
+```bash
+python scripts/run_akshare_smoke.py \
+  --symbol 000001 \
+  --start-date 2024-01-02 \
+  --end-date 2024-01-03 \
+  --output /tmp/akshare-smoke.json
+```
+
+The script writes artifacts to a temporary project root by default, prints a
+JSON report to stdout, sends logs to stderr, and returns exit code `0` for
+success, `2` for partial success, or `1` for failure. The report includes
+dependency checks, DataAgent output,
+failed symbols, artifact paths, and suggested actions.
 
 Run the Streamlit dashboard:
 

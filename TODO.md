@@ -17,7 +17,7 @@ Current status:
   - [x] Add retry with exponential backoff for AkShare/Eastmoney requests
   - [x] Add per-symbol failure isolation
   - [x] Save failed symbols, error messages, and retry counts to a manifest
-  - [ ] Add a real AkShare smoke test that reports actionable diagnostics
+  - [x] Add a real AkShare smoke test that reports actionable diagnostics
   - [ ] Add request throttling and configurable sleep between symbols
 
 - [ ] Add a daily research pipeline script
@@ -133,9 +133,8 @@ Current status:
 
 Continue P0 data reliability:
 
-1. Improve the real AkShare smoke test so failures are diagnosable.
-2. Add request throttling and configurable sleep between symbols.
-3. Then build the daily research pipeline script.
+1. Add request throttling and configurable sleep between symbols.
+2. Then build the daily research pipeline script.
 
 This is the most direct path from the current offline MVP to useful daily
 self-directed trading research.

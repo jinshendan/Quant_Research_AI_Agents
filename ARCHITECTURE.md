@@ -1293,12 +1293,18 @@ Implemented in `quant-agent/`:
 -   failed-symbol manifests under `data/failures/`
 -   DataAgent output and metadata fields for `successful_symbols`,
     `failed_symbols`, `download_stats`, and `failure_manifest_path`
+-   `AkShareSmokeSpec`, `AkShareSmokeReport`, and `SmokeDiagnostic` for
+    machine-readable live-data diagnostics
+-   `scripts/run_akshare_smoke.py`, which prints JSON diagnostics to stdout,
+    sends logs to stderr, and exits with `0` for success, `2` for partial
+    success, or `1` for failure
 -   tests for transient recovery, partial failure manifests, and all-symbol
     failure behavior
+-   tests for AkShare smoke success, partial success, and failure diagnostics
 
 Calendar alignment now runs only for successfully downloaded symbols. If all
 symbols fail, `DataAgent` returns an error instead of writing empty artifacts.
-The live AkShare smoke test and request throttling remain tracked in `TODO.md`.
+Request throttling remains tracked in `TODO.md`.
 
 ------------------------------------------------------------------------
 

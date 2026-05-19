@@ -18,6 +18,12 @@ from agents.backtest_agent import (
     run_benchmark_tests,
     save_backtest_result_json,
 )
+from agents.akshare_smoke import (
+    AkShareSmokeReport,
+    AkShareSmokeSpec,
+    SmokeDiagnostic,
+    run_akshare_smoke,
+)
 from agents.data_agent import DataAgent, MarketDataSpec
 from agents.duckdb_store import (
     DuckDBMarketDataStore,
@@ -110,6 +116,8 @@ from agents.trading_calendar import (
 
 __all__ = [
     "AkShareMarketDataProvider",
+    "AkShareSmokeReport",
+    "AkShareSmokeSpec",
     "AkShareTradingCalendarProvider",
     "BacktestAgent",
     "BacktestBuildResult",
@@ -168,6 +176,7 @@ __all__ = [
     "ReportDraft",
     "ReportSpec",
     "SharpeResult",
+    "SmokeDiagnostic",
     "TradingCalendarProvider",
     "align_to_trading_calendar",
     "apply_rank_transforms",
@@ -185,6 +194,7 @@ __all__ = [
     "memory_record_to_text",
     "render_report_markdown",
     "run_benchmark_tests",
+    "run_akshare_smoke",
     "save_markdown_report",
     "save_backtest_result_json",
     "select_memory_record",
