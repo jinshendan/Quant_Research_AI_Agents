@@ -1089,7 +1089,7 @@ Implemented in `quant-agent/`:
 -   tests for inline and JSONL source validation, selector behavior, failed
     benchmark conclusions, wiki context, and ReportAgent response integration
 
-Current ReportAgent payload:
+Day 25 ReportAgent payload:
 
 ```json
 {
@@ -1099,7 +1099,7 @@ Current ReportAgent payload:
 }
 ```
 
-Current ReportAgent output:
+Day 25 ReportAgent output:
 
 ```text
 state = report_draft_built
@@ -1110,8 +1110,55 @@ report_format = structured_json
 next_action = Generate markdown reports in Day 26.
 ```
 
-Day 25 intentionally returns structured report data only. Markdown rendering
-and report file persistence remain scoped to Day 26.
+Day 25 introduced structured report data only. Markdown rendering and report
+file persistence are implemented in Day 26.
+
+## Day 26 --- Markdown Reports
+
+Implemented in `quant-agent/`:
+
+-   `render_report_markdown(...)` in `quant-agent/agents/report_agent.py`
+    converts a structured report draft into deterministic Markdown
+-   `save_markdown_report(...)` persists Markdown reports atomically
+-   optional `payload.report_path` for caller-controlled report destinations
+-   default report destination:
+    `research_logs/{safe_factor_name}_{memory_id}.md`
+-   `MarkdownReportResult` metadata for path, bytes written, and format
+-   structured logs for Markdown generation success and failure
+-   tests for Markdown rendering, custom report path handling, default report
+    persistence, and invalid draft validation
+
+Current ReportAgent payload:
+
+```json
+{
+  "memory_path": "memory/factor_memory.jsonl",
+  "factor_name": "alpha_001",
+  "factor_wiki_path": "memory/factor_wiki.md",
+  "report_path": "research_logs/alpha_001.md"
+}
+```
+
+`report_path` is optional. If it is omitted, the agent writes to
+`research_logs/` under the configured project root.
+
+Current ReportAgent output:
+
+```text
+state = markdown_report_generated
+report_draft
+report_title
+section_count
+report_draft_format = structured_json
+report_format = markdown
+report_markdown
+report_file
+report_path
+next_action = Build Streamlit dashboard in Day 27.
+```
+
+Day 26 intentionally stops at Markdown report generation. Dashboard/UI work is
+scoped to Day 27.
 
 ------------------------------------------------------------------------
 

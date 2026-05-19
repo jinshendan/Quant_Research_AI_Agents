@@ -92,10 +92,13 @@ from agents.memory_index import (
 )
 from agents.ohlcv_cleaner import OhlcvCleanResult, clean_ohlcv
 from agents.report_agent import (
+    MarkdownReportResult,
     ReportAgent,
     ReportDraft,
     ReportSpec,
     build_report_draft,
+    render_report_markdown,
+    save_markdown_report,
     select_memory_record,
 )
 from agents.trading_calendar import (
@@ -154,6 +157,7 @@ __all__ = [
     "MemorySearchResult",
     "MemorySpec",
     "MemoryStorageResult",
+    "MarkdownReportResult",
     "OhlcvCleanResult",
     "RankTransformResult",
     "RankTransformSpec",
@@ -179,7 +183,9 @@ __all__ = [
     "compute_sharpe_ratio",
     "generate_backtest_result_json",
     "memory_record_to_text",
+    "render_report_markdown",
     "run_benchmark_tests",
+    "save_markdown_report",
     "save_backtest_result_json",
     "select_memory_record",
     "summarize_factor_wiki_records",

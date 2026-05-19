@@ -491,8 +491,9 @@ Implemented through Day 25:
 - FAISS vector index build and retrieval over saved factor memory records
 - Markdown factor wiki generation from saved memory records
 - ReportAgent structured research report drafts from factor memory records
+- Markdown report rendering and persistence from ReportAgent drafts
 
 Next implementation focus:
 
-Day 26 should generate markdown reports from ReportAgent drafts without adding
-dashboard features yet.
+Day 27 should build the Streamlit dashboard using existing memory, wiki, and
+Markdown report artifacts.

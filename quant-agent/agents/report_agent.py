@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,9 @@ from core.models import AgentRequest, AgentResponse
 from agents.memory_agent import FactorMemoryStore
 
 REPORT_SCHEMA_VERSION = 1
-REPORT_FORMAT = "structured_json"
+REPORT_DRAFT_FORMAT = "structured_json"
+REPORT_FORMAT = "markdown"
+DEFAULT_REPORTS_DIRNAME = "research_logs"
 REPORT_SECTION_ORDER = (
     ("hypothesis", "Hypothesis"),
     ("factor_formula", "Factor Formula"),
@@ -21,6 +24,7 @@ REPORT_SECTION_ORDER = (
     ("risk_analysis", "Risk Analysis"),
     ("conclusion", "Conclusion"),
 )
+_SAFE_REPORT_STEM_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +36,7 @@ class ReportSpec:
     memory_id: str | None = None
     factor_name: str | None = None
     factor_wiki_path: Path | None = None
+    report_path: Path | None = None
     report_title: str | None = None
 
     @classmethod
@@ -54,6 +59,7 @@ class ReportSpec:
                 payload,
                 ("factor_wiki_path", "wiki_path"),
             ),
+            report_path=_optional_path(payload, "report_path"),
             report_title=_optional_str(payload, "report_title"),
         )
 
@@ -66,13 +72,14 @@ class ReportSpec:
             "factor_wiki_path": (
                 str(self.factor_wiki_path) if self.factor_wiki_path else None
             ),
+            "report_path": str(self.report_path) if self.report_path else None,
             "report_title": self.report_title,
         }
 
 
 @dataclass(frozen=True, slots=True)
 class ReportDraft:
-    """Structured report draft. Markdown rendering is a later step."""
+    """Structured report draft before Markdown rendering."""
 
     document: dict[str, Any]
 
@@ -81,8 +88,24 @@ class ReportDraft:
         return str(self.document["title"])
 
 
+@dataclass(frozen=True, slots=True)
+class MarkdownReportResult:
+    """Rendered Markdown report and persistence metadata."""
+
+    report_path: Path
+    bytes_written: int
+    report_format: str = REPORT_FORMAT
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "report_path": str(self.report_path),
+            "bytes_written": self.bytes_written,
+            "report_format": self.report_format,
+        }
+
+
 class ReportAgent:
-    """Build structured research report drafts from factor memory records."""
+    """Build structured research report drafts and render Markdown reports."""
 
     name = "ReportAgent"
 
@@ -164,15 +187,52 @@ class ReportAgent:
             "Built structured report draft.",
             extra={"action": "build_report_draft", "status": "success"},
         )
+
+        self.logger.info(
+            "Generating markdown report.",
+            extra={"action": "generate_markdown_report", "status": "running"},
+        )
+        try:
+            markdown_report = render_report_markdown(report_draft.document)
+            markdown_result = save_markdown_report(
+                markdown_report,
+                self.resolve_report_path(spec, report_draft),
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            elapsed = perf_counter() - started_at
+            self.logger.warning(
+                "Markdown report generation failed.",
+                extra={"action": "generate_markdown_report", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    memory_id=report_draft.document["source"]["memory_id"],
+                    factor_name=report_draft.document["factor"]["name"],
+                    section_count=len(report_draft.document["sections"]),
+                ),
+            )
+
+        elapsed = perf_counter() - started_at
+        self.logger.info(
+            "Generated markdown report.",
+            extra={"action": "generate_markdown_report", "status": "success"},
+        )
         return AgentResponse.success(
             output={
-                "state": "report_draft_built",
+                "state": "markdown_report_generated",
                 "request": spec.to_dict(),
                 "report_draft": report_draft.document,
                 "report_title": report_draft.title,
                 "section_count": len(report_draft.document["sections"]),
+                "report_draft_format": REPORT_DRAFT_FORMAT,
                 "report_format": REPORT_FORMAT,
-                "next_action": "Generate markdown reports in Day 26.",
+                "report_markdown": markdown_report,
+                "report_file": markdown_result.to_dict(),
+                "report_path": str(markdown_result.report_path),
+                "next_action": "Build Streamlit dashboard in Day 27.",
             },
             metadata=self._metadata(
                 request,
@@ -180,6 +240,7 @@ class ReportAgent:
                 memory_id=report_draft.document["source"]["memory_id"],
                 factor_name=report_draft.document["factor"]["name"],
                 section_count=len(report_draft.document["sections"]),
+                report_path=markdown_result.report_path,
             ),
         )
 
@@ -204,6 +265,14 @@ class ReportAgent:
             raise OSError(msg)
         return factor_wiki_path.read_text(encoding="utf-8")
 
+    def resolve_report_path(self, spec: ReportSpec, report_draft: ReportDraft) -> Path:
+        if spec.report_path is not None:
+            return spec.report_path
+        memory_id = str(report_draft.document["source"]["memory_id"])
+        factor_name = str(report_draft.document["factor"]["name"])
+        stem = _safe_report_stem(f"{factor_name}_{memory_id}")
+        return self.config.project_root / DEFAULT_REPORTS_DIRNAME / f"{stem}.md"
+
     def _metadata(
         self,
         request: AgentRequest,
@@ -212,6 +281,7 @@ class ReportAgent:
         memory_id: str | None = None,
         factor_name: str | None = None,
         section_count: int | None = None,
+        report_path: Path | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -224,6 +294,8 @@ class ReportAgent:
             metadata["factor_name"] = factor_name
         if section_count is not None:
             metadata["section_count"] = section_count
+        if report_path is not None:
+            metadata["report_path"] = str(report_path)
         return metadata
 
 
@@ -278,7 +350,7 @@ def build_report_draft(
 
     document = {
         "schema_version": REPORT_SCHEMA_VERSION,
-        "report_format": REPORT_FORMAT,
+        "report_format": REPORT_DRAFT_FORMAT,
         "title": report_title or f"Research Report: {factor_name}",
         "source": {
             "memory_id": memory_id,
@@ -307,10 +379,61 @@ def build_report_draft(
             _risk_analysis_section(performance, benchmark, diagnostics, artifacts),
             _conclusion_section(performance, benchmark, diagnostics),
         ],
-        "next_action": "Generate markdown reports in Day 26.",
+        "next_action": "Build Streamlit dashboard in Day 27.",
     }
     json.dumps(document, ensure_ascii=True, allow_nan=False)
     return ReportDraft(document=document)
+
+
+def render_report_markdown(report_draft: Mapping[str, Any]) -> str:
+    """Render a structured report draft to Markdown."""
+
+    title = _required_str(report_draft, "title")
+    source = _required_mapping(report_draft, "source")
+    factor = _required_mapping(report_draft, "factor")
+    sections = _required_sequence(report_draft, "sections")
+    lines = [
+        f"# {title}",
+        "",
+        "## Metadata",
+        "",
+        f"- Memory ID: `{_string_or_na(source.get('memory_id'))}`",
+        f"- Source task: `{_string_or_na(source.get('source_task_id'))}`",
+        f"- Source agent: {_string_or_na(source.get('source_agent'))}",
+        f"- Generated at: {_string_or_na(source.get('generated_at'))}",
+        "",
+        "## Factor",
+        "",
+        f"- Name: {_string_or_na(factor.get('name'))}",
+        f"- Formula: {_string_or_na(factor.get('formula'))}",
+        f"- Direction: {_string_or_na(factor.get('direction'))}",
+        f"- Universe: {_string_or_na(factor.get('universe'))}",
+        "",
+    ]
+
+    for section in sections:
+        if not isinstance(section, Mapping):
+            msg = "report_draft.sections must contain objects."
+            raise ValueError(msg)
+        lines.extend(_render_section(section))
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def save_markdown_report(markdown_report: str, report_path: Path) -> MarkdownReportResult:
+    """Persist a Markdown report atomically."""
+
+    if not markdown_report.strip():
+        msg = "markdown_report must not be empty."
+        raise ValueError(msg)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = Path(f"{report_path}.tmp")
+    temp_path.write_text(markdown_report, encoding="utf-8")
+    temp_path.replace(report_path)
+    return MarkdownReportResult(
+        report_path=report_path,
+        bytes_written=len(markdown_report.encode("utf-8")),
+    )
 
 
 def _hypothesis_section(factor: Mapping[str, Any]) -> dict[str, Any]:
@@ -430,6 +553,14 @@ def _required_mapping(payload: Mapping[str, Any], key: str) -> Mapping[str, Any]
     return value
 
 
+def _required_sequence(payload: Mapping[str, Any], key: str) -> Sequence[Any]:
+    value = payload.get(key)
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        msg = f"{key} must be a sequence."
+        raise ValueError(msg)
+    return value
+
+
 def _required_str(payload: Mapping[str, Any], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -486,3 +617,44 @@ def _string_sequence(value: Any) -> list[str]:
     if isinstance(value, Sequence):
         return [str(item).strip() for item in value if str(item).strip()]
     return [str(value).strip()]
+
+
+def _render_section(section: Mapping[str, Any]) -> list[str]:
+    title = _required_str(section, "title")
+    content = _required_mapping(section, "content")
+    lines = [f"## {title}", ""]
+    for key, value in content.items():
+        lines.append(f"- {_humanize_key(str(key))}: {_format_markdown_value(value)}")
+    lines.append("")
+    return lines
+
+
+def _format_markdown_value(value: Any) -> str:
+    if isinstance(value, Mapping):
+        rendered_items = [
+            f"{_humanize_key(str(key))}={_string_or_na(item)}"
+            for key, item in value.items()
+        ]
+        return ", ".join(rendered_items) if rendered_items else "N/A"
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        rendered_values = [_string_or_na(item) for item in value]
+        return ", ".join(rendered_values) if rendered_values else "N/A"
+    return _string_or_na(value)
+
+
+def _string_or_na(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped if stripped else "N/A"
+    return str(value)
+
+
+def _humanize_key(key: str) -> str:
+    return key.replace("_", " ").strip().capitalize()
+
+
+def _safe_report_stem(value: str) -> str:
+    stem = _SAFE_REPORT_STEM_PATTERN.sub("_", value.strip()).strip("._")
+    return stem or "factor_report"

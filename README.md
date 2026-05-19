@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-25：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引、factor wiki 保存和 ReportAgent 结构化草稿。
+> 当前项目处于早期搭建阶段。已完成 Day 1-26：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引、factor wiki 保存、ReportAgent 结构化草稿和 Markdown 报告落盘。
 
 ## Why This Project
 
@@ -71,11 +71,11 @@ Implemented:
 - FAISS vector index build and search over factor memory records
 - Markdown factor wiki generation from saved memory records
 - `ReportAgent` for building structured research report drafts from factor memory
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, FAISS memory retrieval, factor wiki generation, and ReportAgent behavior
+- Markdown report rendering and file persistence from `ReportAgent` drafts
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, FAISS memory retrieval, factor wiki generation, ReportAgent behavior, and Markdown report generation
 
 Not implemented yet:
 
-- markdown report file generation
 - Streamlit dashboard
 
 ## Project Structure
@@ -125,6 +125,8 @@ Not implemented yet:
     │   ├── factor_memory.faiss
     │   ├── factor_memory.faiss.metadata.json
     │   └── factor_wiki.md
+    ├── research_logs/
+    │   └── *.md
     ├── prompts/
     ├── skills/
     ├── tests/
@@ -618,13 +620,14 @@ result = FactorWikiStore("memory/factor_wiki.md").save(records)
 print(result.to_dict())
 ```
 
-Day 24 intentionally stops at saving the wiki. ReportAgent is scoped to Day 25.
+Day 24 saves the wiki, Day 25 builds structured report drafts, and Day 26
+renders those drafts to Markdown files.
 
 ## ReportAgent Example
 
-`ReportAgent` builds a structured report draft from a factor memory record. It
-does not write a markdown report file yet; Day 26 owns markdown rendering and
-report persistence.
+`ReportAgent` builds a structured report draft from a factor memory record,
+renders it to Markdown, and writes it under `research_logs/` by default. Pass
+`report_path` to override the output file.
 
 ```python
 from agents.report_agent import ReportAgent
@@ -640,11 +643,14 @@ request = AgentRequest.create(
 
 response = ReportAgent().run(request)
 print(response.output["report_title"])
-print(response.output["report_draft"]["sections"])
+print(response.output["report_path"])
+print(response.output["report_markdown"])
 ```
 
-The current draft is structured JSON with five sections: hypothesis, factor
-formula, backtest results, risk analysis, and conclusion.
+The output keeps the structured JSON draft and adds Markdown output metadata:
+`report_markdown`, `report_file`, and `report_path`. The five report sections
+are hypothesis, factor formula, backtest results, risk analysis, and
+conclusion.
 
 ## Configuration
 
@@ -694,8 +700,9 @@ Week 1:
 - Day 23: FAISS memory retrieval
 - Day 24: factor wiki markdown
 - Day 25: ReportAgent structured draft
+- Day 26: Markdown report generation
 
-Next steps cover markdown report generation and dashboard.
+Next step: Streamlit dashboard.
 
 ## Engineering Principles
 

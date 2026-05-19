@@ -10,6 +10,8 @@ from agents.report_agent import (
     ReportAgent,
     ReportSpec,
     build_report_draft,
+    render_report_markdown,
+    save_markdown_report,
     select_memory_record,
 )
 from core.config import AppConfig
@@ -86,6 +88,7 @@ def test_report_spec_accepts_memory_path_and_wiki_alias(tmp_path: Path) -> None:
             "memory_path": str(tmp_path / "memory" / "factor_memory.jsonl"),
             "factor_name": "alpha_momentum",
             "wiki_path": str(tmp_path / "memory" / "factor_wiki.md"),
+            "report_path": str(tmp_path / "reports" / "momentum.md"),
             "report_title": "Momentum Factor Report",
         }
     )
@@ -94,6 +97,7 @@ def test_report_spec_accepts_memory_path_and_wiki_alias(tmp_path: Path) -> None:
     assert spec.memory_path == tmp_path / "memory" / "factor_memory.jsonl"
     assert spec.factor_name == "alpha_momentum"
     assert spec.factor_wiki_path == tmp_path / "memory" / "factor_wiki.md"
+    assert spec.report_path == tmp_path / "reports" / "momentum.md"
     assert spec.report_title == "Momentum Factor Report"
 
 
@@ -102,7 +106,7 @@ def test_report_spec_rejects_missing_memory_source() -> None:
         ReportSpec.from_payload({})
 
 
-def test_report_agent_builds_structured_draft_from_memory_path(
+def test_report_agent_generates_markdown_report_from_memory_path(
     tmp_path: Path,
 ) -> None:
     memory_path = tmp_path / "memory" / "factor_memory.jsonl"
@@ -129,11 +133,12 @@ def test_report_agent_builds_structured_draft_from_memory_path(
     )
 
     assert response.status == "success"
-    assert response.output["state"] == "report_draft_built"
+    assert response.output["state"] == "markdown_report_generated"
     assert response.output["report_title"] == "Research Report: alpha_momentum"
     assert response.output["section_count"] == 5
-    assert response.output["report_format"] == "structured_json"
-    assert response.output["next_action"] == "Generate markdown reports in Day 26."
+    assert response.output["report_draft_format"] == "structured_json"
+    assert response.output["report_format"] == "markdown"
+    assert response.output["next_action"] == "Build Streamlit dashboard in Day 27."
     assert response.metadata["agent"] == "ReportAgent"
     assert response.metadata["task_id"] == "report-task-1"
     assert response.metadata["memory_id"] == "memory-1"
@@ -152,7 +157,40 @@ def test_report_agent_builds_structured_draft_from_memory_path(
         "conclusion",
     ]
     assert draft["sections"][-1]["content"]["verdict"] == "candidate_for_follow_up"
+    assert draft["next_action"] == "Build Streamlit dashboard in Day 27."
+    report_path = tmp_path / "research_logs" / "alpha_momentum_memory-1.md"
+    markdown_report = response.output["report_markdown"]
+    assert response.output["report_path"] == str(report_path)
+    assert response.metadata["report_path"] == str(report_path)
+    assert response.output["report_file"]["report_path"] == str(report_path)
+    assert response.output["report_file"]["report_format"] == "markdown"
+    assert response.output["report_file"]["bytes_written"] == len(
+        markdown_report.encode("utf-8")
+    )
+    assert report_path.read_text(encoding="utf-8") == markdown_report
+    assert markdown_report.startswith("# Research Report: alpha_momentum\n")
+    assert "## Backtest Results" in markdown_report
+    assert "- Benchmark status: passed" in markdown_report
     assert "ReportAgent | build_report_draft | success" in stream.getvalue()
+    assert "ReportAgent | generate_markdown_report | success" in stream.getvalue()
+
+
+def test_report_agent_writes_custom_markdown_report_path(tmp_path: Path) -> None:
+    report_path = tmp_path / "reports" / "custom.md"
+    agent = ReportAgent(config=_config(tmp_path))
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "memory_record": _memory_record("memory-custom"),
+                "report_path": str(report_path),
+            }
+        )
+    )
+
+    assert response.status == "success"
+    assert response.output["report_path"] == str(report_path)
+    assert report_path.is_file()
 
 
 def test_report_agent_requires_selector_for_multiple_records(tmp_path: Path) -> None:
@@ -202,6 +240,39 @@ def test_build_report_draft_marks_failed_benchmark_as_needs_review() -> None:
     assert conclusion["content"]["verdict"] == "needs_review"
     assert conclusion["content"]["failure_reason"] == "Failed benchmark tests: sharpe"
     assert risk["content"]["failed_tests"] == ["sharpe"]
+
+
+def test_render_report_markdown_outputs_expected_sections() -> None:
+    draft = build_report_draft(_memory_record("memory-1"))
+
+    markdown = render_report_markdown(draft.document)
+
+    assert markdown.startswith("# Research Report: alpha_momentum\n")
+    assert "## Metadata" in markdown
+    assert "- Memory ID: `memory-1`" in markdown
+    assert "## Hypothesis" in markdown
+    assert "## Conclusion" in markdown
+    assert "- Verdict: candidate_for_follow_up" in markdown
+
+
+def test_render_report_markdown_rejects_missing_sections() -> None:
+    draft = build_report_draft(_memory_record("memory-1")).document
+    draft.pop("sections")
+
+    with pytest.raises(ValueError, match="sections"):
+        render_report_markdown(draft)
+
+
+def test_save_markdown_report_writes_file_atomically(tmp_path: Path) -> None:
+    report_path = tmp_path / "nested" / "report.md"
+
+    result = save_markdown_report("# Report\n", report_path)
+
+    assert result.report_path == report_path
+    assert result.report_format == "markdown"
+    assert result.bytes_written == len("# Report\n".encode("utf-8"))
+    assert report_path.read_text(encoding="utf-8") == "# Report\n"
+    assert not Path(f"{report_path}.tmp").exists()
 
 
 def test_build_report_draft_rejects_missing_factor_name() -> None:
