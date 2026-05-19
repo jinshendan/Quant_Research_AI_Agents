@@ -466,6 +466,17 @@ def test_data_agent_returns_error_when_all_symbols_fail(tmp_path: Path) -> None:
     assert "000001" in str(response.error)
     assert "000002" in str(response.error)
     assert "RuntimeError: transient provider failure for 000001" in str(response.error)
+    assert response.metadata["download_stats"]["failed_symbols"] == [
+        "000001",
+        "000002",
+    ]
+    assert response.metadata["failure_manifest_path"] is not None
+    manifest_path = Path(response.metadata["failure_manifest_path"])
+    assert manifest_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["task_id"] == "data-all-fail"
+    assert manifest["download_stats"]["successful_symbol_count"] == 0
+    assert manifest["download_stats"]["failed_symbol_count"] == 2
 
 
 class FlakyMarketDataProvider(FakeMarketDataProvider):

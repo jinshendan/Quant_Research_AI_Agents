@@ -205,6 +205,14 @@ class OhlcvDownloadResult:
         }
 
 
+class OhlcvDownloadFailureError(RuntimeError):
+    """Download failure that still carries symbol-level diagnostics."""
+
+    def __init__(self, message: str, result: OhlcvDownloadResult) -> None:
+        super().__init__(message)
+        self.result = result
+
+
 class DataAgent:
     """Download raw market data through a provider boundary."""
 
@@ -343,6 +351,29 @@ class DataAgent:
                 ),
             )
             cache_stats = self.market_data_cache.disabled_stats(cache_identity)
+        except OhlcvDownloadFailureError as exc:
+            elapsed = perf_counter() - started_at
+            failure_manifest_path = self.save_download_failure_manifest(
+                exc.result,
+                spec,
+                task_id=request.task_id,
+            )
+            self.logger.exception(
+                "Market data preparation or storage failed.",
+                extra={"action": "prepare_ohlcv", "status": "error"},
+            )
+            return AgentResponse.failure(
+                str(exc),
+                metadata=self._metadata(
+                    request,
+                    elapsed,
+                    provider=spec.provider,
+                    frequency=spec.frequency,
+                    symbols_count=len(symbols),
+                    download_stats=exc.result.stats(),
+                    failure_manifest_path=failure_manifest_path,
+                ),
+            )
         except Exception as exc:
             elapsed = perf_counter() - started_at
             self.logger.exception(
@@ -519,6 +550,15 @@ class DataAgent:
                 extra={"action": "download_symbol_ohlcv", "status": "partial"},
             )
         if not frames:
+            empty_result = OhlcvDownloadResult(
+                data=combine_ohlcv_frames(frames).reset_index(drop=True),
+                requested_symbols=selected_symbols,
+                successful_symbols=tuple(successful_symbols),
+                failures=tuple(failures),
+                retry_attempts=retry_attempts,
+                symbol_sleep_events=symbol_sleep_events,
+                symbol_sleep_total_sec=symbol_sleep_total_sec,
+            )
             failed_symbols = ", ".join(failure.symbol for failure in failures) or "none"
             failure_details = "; ".join(
                 (
@@ -531,7 +571,7 @@ class DataAgent:
                 f"No OHLCV data downloaded. Failed symbols: {failed_symbols}. "
                 f"Errors: {failure_details}."
             )
-            raise RuntimeError(msg)
+            raise OhlcvDownloadFailureError(msg, empty_result)
 
         return OhlcvDownloadResult(
             data=combine_ohlcv_frames(frames).reset_index(drop=True),

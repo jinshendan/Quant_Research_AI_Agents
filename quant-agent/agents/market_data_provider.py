@@ -73,16 +73,23 @@ class AkShareMarketDataProvider:
 
     timeout: float = 15.0
     stock_hist_func: Callable[..., pd.DataFrame] | None = None
+    stock_daily_func: Callable[..., pd.DataFrame] | None = None
     index_cons_func: Callable[..., pd.DataFrame] | None = None
 
     name: str = "akshare"
 
     def __post_init__(self) -> None:
-        if self.stock_hist_func is None or self.index_cons_func is None:
+        if (
+            self.stock_hist_func is None
+            or self.stock_daily_func is None
+            or self.index_cons_func is None
+        ):
             import akshare as ak  # type: ignore[import-untyped]
 
             if self.stock_hist_func is None:
                 self.stock_hist_func = ak.stock_zh_a_hist
+            if self.stock_daily_func is None:
+                self.stock_daily_func = ak.stock_zh_a_daily
             if self.index_cons_func is None:
                 self.index_cons_func = ak.index_stock_cons_csindex
 
@@ -135,15 +142,26 @@ class AkShareMarketDataProvider:
             msg = "AkShare stock history function is not configured."
             raise RuntimeError(msg)
 
-        raw = self.stock_hist_func(
-            symbol=symbol,
-            period=frequency,
-            start_date=_akshare_date(start_date),
-            end_date=_akshare_date(end_date),
-            adjust=adjust,
-            timeout=self.timeout,
-        )
-        return normalize_akshare_ohlcv(raw, symbol=symbol)
+        try:
+            raw = self.stock_hist_func(
+                symbol=symbol,
+                period=frequency,
+                start_date=_akshare_date(start_date),
+                end_date=_akshare_date(end_date),
+                adjust=adjust,
+                timeout=self.timeout,
+            )
+            return normalize_akshare_ohlcv(raw, symbol=symbol)
+        except Exception:
+            if self.stock_daily_func is None or frequency != "daily":
+                raise
+            raw_daily = self.stock_daily_func(
+                symbol=_sina_symbol(symbol),
+                start_date=_akshare_date(start_date),
+                end_date=_akshare_date(end_date),
+                adjust=adjust,
+            )
+            return normalize_akshare_daily_ohlcv(raw_daily, symbol=symbol)
 
 
 def normalize_akshare_ohlcv(raw: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
@@ -169,6 +187,41 @@ def normalize_akshare_ohlcv(raw: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
     return frame.sort_values(["symbol", "date"]).reset_index(drop=True)
 
 
+def normalize_akshare_daily_ohlcv(raw: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
+    """Normalize AkShare's Sina daily fallback data into the project schema."""
+
+    if raw.empty:
+        return pd.DataFrame(columns=OHLCV_COLUMNS)
+
+    required_columns = ["date", "open", "high", "low", "close", "volume", "amount"]
+    missing_columns = [column for column in required_columns if column not in raw.columns]
+    if missing_columns:
+        msg = f"AkShare daily OHLCV data missing columns: {missing_columns}."
+        raise ValueError(msg)
+
+    frame = raw.copy()
+    frame["symbol"] = symbol
+    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+
+    numeric_columns = [column for column in required_columns if column != "date"]
+    for column in numeric_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    frame = frame.sort_values("date").reset_index(drop=True)
+    previous_close = frame["close"].shift(1)
+    frame["price_change"] = frame["close"] - previous_close
+    frame["pct_change"] = frame["price_change"] / previous_close * 100.0
+    frame["amplitude"] = (frame["high"] - frame["low"]) / previous_close * 100.0
+
+    if "turnover" in frame.columns:
+        turnover = pd.to_numeric(frame["turnover"], errors="coerce")
+        frame["turnover_rate"] = turnover * 100.0 if turnover.abs().max() <= 1.0 else turnover
+    else:
+        frame["turnover_rate"] = pd.NA
+
+    return frame[OHLCV_COLUMNS].sort_values(["symbol", "date"]).reset_index(drop=True)
+
+
 def combine_ohlcv_frames(frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame(columns=OHLCV_COLUMNS)
@@ -180,6 +233,14 @@ def combine_ohlcv_frames(frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
 
 def _akshare_date(value: date) -> str:
     return value.strftime("%Y%m%d")
+
+
+def _sina_symbol(symbol: str) -> str:
+    if symbol.startswith("6"):
+        return f"sh{symbol}"
+    if symbol.startswith(("4", "8")):
+        return f"bj{symbol}"
+    return f"sz{symbol}"
 
 
 def _is_stock_symbol(value: str) -> bool:

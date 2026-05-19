@@ -21,6 +21,8 @@ Current status:
   - [x] Save failed symbols, error messages, and retry counts to a manifest
   - [x] Add a real AkShare smoke test that reports actionable diagnostics
   - [x] Add request throttling and configurable sleep between symbols
+  - [x] Add fallback from AkShare Eastmoney historical K-line data to Sina daily data
+  - [x] Save all-symbol failure manifests for debugging
 
 - [x] Add a daily research pipeline script
   - [x] Create `scripts/run_daily_research.py`

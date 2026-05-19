@@ -1298,6 +1298,10 @@ Implemented in `quant-agent/`:
     throttle sleep seconds
 -   `AkShareSmokeSpec`, `AkShareSmokeReport`, and `SmokeDiagnostic` for
     machine-readable live-data diagnostics
+-   AkShare historical-data fallback from Eastmoney `stock_zh_a_hist` to Sina
+    `stock_zh_a_daily`, normalized into the same OHLCV schema
+-   failure manifests even when every requested symbol fails before raw files
+    can be written
 -   `scripts/run_akshare_smoke.py`, which prints JSON diagnostics to stdout,
     sends logs to stderr, and exits with `0` for success, `2` for partial
     success, or `1` for failure

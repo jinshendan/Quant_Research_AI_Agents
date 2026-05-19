@@ -37,7 +37,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | 交易日历对齐 | 已实现 | 生成 symbol/date 网格，标记缺失或停牌 |
 | DuckDB 持久化 | 已实现 | 保存 aligned OHLCV 和运行元数据 |
 | 市场数据缓存 | 已实现 | 文件缓存、cache hit、force refresh、stale artifact 检查 |
-| 数据可靠性 | 已实现 | 单票重试、symbol 间 sleep、部分失败隔离、失败 manifest、AkShare smoke diagnostic |
+| 数据可靠性 | 已实现 | 单票重试、symbol 间 sleep、部分失败隔离、失败 manifest、AkShare smoke diagnostic、历史行情备用接口 |
 | HypothesisAgent | 已实现 | 生成结构化 alpha 假设 |
 | 因子模板库 | 已实现 | 动量、反转、波动率、流动性、突破等模板 |
 | FeatureAgent | 已实现 | 计算因子矩阵、ranking transform、rolling feature |
@@ -149,6 +149,8 @@ python scripts/run_akshare_smoke.py \
 ```
 
 AkShare smoke test 会输出 JSON 诊断报告到 stdout，日志输出到 stderr。
+如果 AkShare 的东方财富历史 K 线接口被远端断开，DataAgent 会自动 fallback 到
+AkShare 的 Sina 日线接口，并继续归一化为统一 OHLCV schema。
 退出码含义：
 
 - `0`: 成功
@@ -392,7 +394,7 @@ for real-money trading decisions.
 | Trading calendar alignment | Done | Symbol/date grid with missing or suspended flags |
 | DuckDB storage | Done | Aligned OHLCV and run metadata |
 | Market data cache | Done | File cache, cache hit, force refresh, stale artifact checks |
-| Data reliability | Done | Retry, symbol sleep, partial success, failure manifest, AkShare smoke diagnostics |
+| Data reliability | Done | Retry, symbol sleep, partial success, failure manifest, AkShare smoke diagnostics, historical-data fallback |
 | HypothesisAgent | Done | Structured alpha hypotheses |
 | Factor templates | Done | Momentum, reversal, volatility, liquidity, breakout templates |
 | FeatureAgent | Done | Factor matrices, ranking transforms, rolling features |
@@ -473,6 +475,10 @@ python scripts/run_akshare_smoke.py \
   --output-language bilingual \
   --output /tmp/akshare-smoke.json
 ```
+
+If AkShare's Eastmoney historical K-line endpoint closes the connection,
+DataAgent automatically falls back to AkShare's Sina daily endpoint and still
+normalizes the result into the shared OHLCV schema.
 
 Run the dashboard:
 
