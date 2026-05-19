@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents.memory_index import FactorMemoryVectorIndex
 from agents.memory_agent import FactorMemoryStore
 from core.config import AppConfig
 from dashboard import (
     MarkdownReportSummary,
+    build_semantic_search_view,
     build_dashboard_summary,
     build_factor_explorer_options,
     build_factor_explorer_view,
@@ -15,6 +17,7 @@ from dashboard import (
     load_dashboard_data,
     load_markdown_report_summaries,
     match_report_summary,
+    run_semantic_memory_search,
     select_factor_record,
 )
 
@@ -88,8 +91,16 @@ def test_default_dashboard_paths_use_project_artifacts(tmp_path: Path) -> None:
     paths = default_dashboard_paths(_config(tmp_path))
 
     assert paths.memory_path == tmp_path / "memory" / "factor_memory.jsonl"
+    assert paths.memory_index_path == tmp_path / "memory" / "factor_memory.faiss"
+    assert (
+        paths.memory_index_metadata_path
+        == tmp_path / "memory" / "factor_memory.faiss.metadata.json"
+    )
     assert paths.wiki_path == tmp_path / "memory" / "factor_wiki.md"
     assert paths.report_dir == tmp_path / "research_logs"
+    assert paths.to_dict()["memory_index_path"] == str(
+        tmp_path / "memory" / "factor_memory.faiss"
+    )
     assert paths.to_dict()["report_dir"] == str(tmp_path / "research_logs")
 
 
@@ -240,6 +251,92 @@ def test_match_report_summary_prefers_memory_id_match(tmp_path: Path) -> None:
     matched = match_report_summary(record, [factor_only_report, memory_report])
 
     assert matched == memory_report
+
+
+def test_run_semantic_memory_search_returns_error_for_blank_query(
+    tmp_path: Path,
+) -> None:
+    paths = default_dashboard_paths(_config(tmp_path))
+
+    view = run_semantic_memory_search(paths, "   ")
+
+    assert view.status == "error"
+    assert view.error == "Search query must not be empty."
+    assert view.matches == ()
+
+
+def test_run_semantic_memory_search_returns_error_for_missing_index(
+    tmp_path: Path,
+) -> None:
+    paths = default_dashboard_paths(_config(tmp_path))
+
+    view = run_semantic_memory_search(paths, "momentum rank_ic")
+
+    assert view.status == "error"
+    assert "Memory FAISS index file not found" in str(view.error)
+    assert view.index_path == paths.memory_index_path
+    assert view.metadata_path == paths.memory_index_metadata_path
+
+
+def test_run_semantic_memory_search_uses_faiss_index_and_matches_reports(
+    tmp_path: Path,
+) -> None:
+    paths = default_dashboard_paths(_config(tmp_path))
+    records = [
+        _memory_record("memory-1", name="alpha_momentum", ic=0.03, rank_ic=0.05, sharpe=1.2),
+        _memory_record("memory-2", name="alpha_reversal", ic=0.01, rank_ic=0.02, sharpe=0.4),
+    ]
+    FactorMemoryVectorIndex(
+        index_path=paths.memory_index_path,
+        metadata_path=paths.memory_index_metadata_path,
+    ).build(records)
+    report = MarkdownReportSummary(
+        path=tmp_path / "alpha_momentum_memory-1.md",
+        title="Research Report: alpha_momentum",
+        byte_count=128,
+        modified_time=1.0,
+    )
+
+    view = run_semantic_memory_search(
+        paths,
+        "alpha_momentum momentum rank_ic",
+        top_k=2,
+        report_summaries=[report],
+    )
+
+    assert view.status == "success"
+    assert view.query == "alpha_momentum momentum rank_ic"
+    assert len(view.matches) == 2
+    assert view.matches[0].memory_id == "memory-1"
+    assert view.matches[0].factor_name == "alpha_momentum"
+    assert view.matches[0].report_summary == report
+    assert view.to_dict()["match_count"] == 2
+
+
+def test_build_semantic_search_view_preserves_match_metadata(tmp_path: Path) -> None:
+    paths = default_dashboard_paths(_config(tmp_path))
+    record = _memory_record(
+        "memory-1",
+        name="alpha_momentum",
+        ic=0.03,
+        rank_ic=0.05,
+        sharpe=1.2,
+    )
+    search_result = FactorMemoryVectorIndex(
+        index_path=paths.memory_index_path,
+        metadata_path=paths.memory_index_metadata_path,
+    ).build([record])
+    raw_result = FactorMemoryVectorIndex(
+        index_path=search_result.index_path,
+        metadata_path=search_result.metadata_path,
+    ).search("alpha_momentum", top_k=1)
+
+    view = build_semantic_search_view(raw_result, top_k=1)
+
+    assert view.status == "success"
+    assert view.matches[0].rank == 1
+    assert view.matches[0].benchmark_status == "passed"
+    assert view.matches[0].record["memory_id"] == "memory-1"
 
 
 def test_build_metric_distribution_frame_handles_empty_and_constant_values() -> None:

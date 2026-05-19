@@ -473,7 +473,7 @@ Perfect architecture later.
 
 # Current Incremental Status
 
-Implemented through Day 28:
+Implemented through Day 29:
 
 - DataAgent ingestion, cleaning, trading-calendar alignment, DuckDB storage, and cache
 - HypothesisAgent deterministic alpha hypothesis generation
@@ -494,7 +494,8 @@ Implemented through Day 28:
 - Markdown report rendering and persistence from ReportAgent drafts
 - Streamlit dashboard for factor ranking, IC distribution, Sharpe distribution, and report inventory
 - Factor Explorer for inspecting one factor memory record and matched report metadata
+- Semantic search UI over the saved FAISS factor memory index
 
 Next implementation focus:
 
-Day 29 should add semantic search UI over saved factor memory records.
+Day 30 should add the end-to-end integration test.

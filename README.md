@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-28：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引、factor wiki 保存、ReportAgent 结构化草稿、Markdown 报告落盘、Streamlit dashboard 和 Factor Explorer。
+> 当前项目处于早期搭建阶段。已完成 Day 1-29：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引、factor wiki 保存、ReportAgent 结构化草稿、Markdown 报告落盘、Streamlit dashboard、Factor Explorer 和 semantic search UI。
 
 ## Why This Project
 
@@ -74,11 +74,12 @@ Implemented:
 - Markdown report rendering and file persistence from `ReportAgent` drafts
 - Streamlit dashboard for factor ranking, IC distribution, Sharpe distribution, and generated report inventory
 - Factor Explorer tab for inspecting one factor memory record, performance, benchmark diagnostics, artifacts, and matched report metadata
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, FAISS memory retrieval, factor wiki generation, ReportAgent behavior, Markdown report generation, dashboard data models, and Factor Explorer view models
+- semantic search UI over the saved FAISS factor memory index
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, FAISS memory retrieval, factor wiki generation, ReportAgent behavior, Markdown report generation, dashboard data models, Factor Explorer view models, and semantic search view models
 
 Not implemented yet:
 
-- semantic search UI
+- end-to-end integration test
 
 ## Project Structure
 
@@ -712,8 +713,9 @@ Week 1:
 - Day 26: Markdown report generation
 - Day 27: Streamlit dashboard
 - Day 28: Factor Explorer
+- Day 29: semantic search UI
 
-Next step: semantic search UI.
+Next step: end-to-end integration test.
 
 ## Engineering Principles
 

@@ -10,6 +10,12 @@ import numpy as np
 import pandas as pd
 
 from agents.factor_wiki import DEFAULT_FACTOR_WIKI_FILENAME, summarize_factor_wiki_records
+from agents.memory_index import (
+    DEFAULT_MEMORY_INDEX_FILENAME,
+    DEFAULT_MEMORY_INDEX_METADATA_FILENAME,
+    FactorMemoryVectorIndex,
+    MemorySearchResult,
+)
 from agents.memory_agent import DEFAULT_MEMORY_FILENAME, FactorMemoryStore
 from agents.report_agent import DEFAULT_REPORTS_DIRNAME
 from core.config import AppConfig
@@ -47,12 +53,16 @@ class DashboardPaths:
     """Artifact paths consumed by the Streamlit dashboard."""
 
     memory_path: Path
+    memory_index_path: Path
+    memory_index_metadata_path: Path
     wiki_path: Path
     report_dir: Path
 
     def to_dict(self) -> dict[str, str]:
         return {
             "memory_path": str(self.memory_path),
+            "memory_index_path": str(self.memory_index_path),
+            "memory_index_metadata_path": str(self.memory_index_metadata_path),
             "wiki_path": str(self.wiki_path),
             "report_dir": str(self.report_dir),
         }
@@ -127,6 +137,60 @@ class FactorExplorerView:
 
 
 @dataclass(frozen=True, slots=True)
+class SemanticSearchMatchView:
+    """Dashboard-ready semantic search match."""
+
+    rank: int
+    score: float
+    memory_id: str
+    factor_name: str
+    benchmark_status: str
+    report_summary: MarkdownReportSummary | None
+    record: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rank": self.rank,
+            "score": self.score,
+            "memory_id": self.memory_id,
+            "factor_name": self.factor_name,
+            "benchmark_status": self.benchmark_status,
+            "report_summary": (
+                self.report_summary.to_dict() if self.report_summary is not None else None
+            ),
+            "record": dict(self.record),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticSearchView:
+    """Dashboard semantic search result state."""
+
+    query: str
+    top_k: int
+    matches: tuple[SemanticSearchMatchView, ...]
+    index_path: Path
+    metadata_path: Path
+    error: str | None = None
+
+    @property
+    def status(self) -> str:
+        return "error" if self.error else "success"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "top_k": self.top_k,
+            "match_count": len(self.matches),
+            "matches": [match.to_dict() for match in self.matches],
+            "index_path": str(self.index_path),
+            "metadata_path": str(self.metadata_path),
+            "status": self.status,
+            "error": self.error,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class DashboardData:
     """Loaded dashboard artifacts before Streamlit rendering."""
 
@@ -140,6 +204,10 @@ def default_dashboard_paths(config: AppConfig) -> DashboardPaths:
 
     return DashboardPaths(
         memory_path=config.memory_dir / DEFAULT_MEMORY_FILENAME,
+        memory_index_path=config.memory_dir / DEFAULT_MEMORY_INDEX_FILENAME,
+        memory_index_metadata_path=(
+            config.memory_dir / DEFAULT_MEMORY_INDEX_METADATA_FILENAME
+        ),
         wiki_path=config.memory_dir / DEFAULT_FACTOR_WIKI_FILENAME,
         report_dir=config.project_root / DEFAULT_REPORTS_DIRNAME,
     )
@@ -381,6 +449,77 @@ def match_report_summary(
     )[0][1]
 
 
+def run_semantic_memory_search(
+    paths: DashboardPaths,
+    query: str,
+    *,
+    top_k: int = 5,
+    report_summaries: Sequence[MarkdownReportSummary] = (),
+) -> SemanticSearchView:
+    """Run semantic search over the saved FAISS factor memory index."""
+
+    normalized_query = query.strip()
+    if not normalized_query:
+        return SemanticSearchView(
+            query=normalized_query,
+            top_k=top_k,
+            matches=(),
+            index_path=paths.memory_index_path,
+            metadata_path=paths.memory_index_metadata_path,
+            error="Search query must not be empty.",
+        )
+
+    try:
+        search_result = FactorMemoryVectorIndex(
+            index_path=paths.memory_index_path,
+            metadata_path=paths.memory_index_metadata_path,
+        ).search(normalized_query, top_k=top_k)
+    except (ImportError, OSError, ValueError) as exc:
+        return SemanticSearchView(
+            query=normalized_query,
+            top_k=top_k,
+            matches=(),
+            index_path=paths.memory_index_path,
+            metadata_path=paths.memory_index_metadata_path,
+            error=str(exc),
+        )
+
+    return build_semantic_search_view(
+        search_result,
+        top_k=top_k,
+        report_summaries=report_summaries,
+    )
+
+
+def build_semantic_search_view(
+    search_result: MemorySearchResult,
+    *,
+    top_k: int,
+    report_summaries: Sequence[MarkdownReportSummary] = (),
+) -> SemanticSearchView:
+    """Convert a memory search result into dashboard-ready rows."""
+
+    matches = tuple(
+        SemanticSearchMatchView(
+            rank=match.rank,
+            score=match.score,
+            memory_id=match.memory_id,
+            factor_name=_text_or_na(match.factor_name),
+            benchmark_status=_text_or_na(match.benchmark_status),
+            report_summary=match_report_summary(match.record, report_summaries),
+            record=dict(match.record),
+        )
+        for match in search_result.matches
+    )
+    return SemanticSearchView(
+        query=search_result.query,
+        top_k=top_k,
+        matches=matches,
+        index_path=search_result.index_path,
+        metadata_path=search_result.metadata_path,
+    )
+
+
 def render_streamlit_dashboard(
     *,
     config: AppConfig | None = None,
@@ -411,12 +550,16 @@ def render_streamlit_dashboard(
         st.header("Artifacts")
         st.caption("Memory")
         st.code(str(paths.memory_path))
+        st.caption("Memory Index")
+        st.code(str(paths.memory_index_path))
         st.caption("Wiki")
         st.code(str(paths.wiki_path))
         st.caption("Reports")
         st.code(str(paths.report_dir))
 
-    dashboard_tab, explorer_tab = st.tabs(["Dashboard", "Factor Explorer"])
+    dashboard_tab, explorer_tab, search_tab = st.tabs(
+        ["Dashboard", "Factor Explorer", "Semantic Search"]
+    )
 
     with dashboard_tab:
         metric_columns = st.columns(5)
@@ -475,6 +618,22 @@ def render_streamlit_dashboard(
                 )
                 _render_factor_explorer(st, explorer_view)
 
+    with search_tab:
+        st.subheader("Semantic Search")
+        search_query = st.text_input(
+            "Search factor memory",
+            placeholder="momentum rank_ic sharpe drawdown",
+        )
+        top_k = st.slider("Matches", min_value=1, max_value=10, value=5)
+        if st.button("Search", type="primary"):
+            search_view = run_semantic_memory_search(
+                paths,
+                search_query,
+                top_k=top_k,
+                report_summaries=data.report_summaries,
+            )
+            _render_semantic_search(st, search_view)
+
     dashboard_logger.info(
         "Rendered dashboard.",
         extra={"action": "render_dashboard", "status": "success"},
@@ -526,6 +685,46 @@ def _render_factor_explorer(st: Any, view: FactorExplorerView) -> None:
 
     with st.expander("Raw memory record"):
         st.json(view.raw_record)
+
+
+def _render_semantic_search(st: Any, view: SemanticSearchView) -> None:
+    if view.error is not None:
+        st.warning(view.error)
+        return
+
+    if not view.matches:
+        st.info("No semantic matches found.")
+        return
+
+    result_frame = pd.DataFrame(
+        [
+            {
+                "rank": match.rank,
+                "score": match.score,
+                "factor_name": match.factor_name,
+                "memory_id": match.memory_id,
+                "benchmark_status": match.benchmark_status,
+                "report": (
+                    match.report_summary.title
+                    if match.report_summary is not None
+                    else "N/A"
+                ),
+            }
+            for match in view.matches
+        ]
+    )
+    st.dataframe(result_frame, use_container_width=True, hide_index=True)
+    for match in view.matches:
+        with st.expander(
+            f"#{match.rank} {match.factor_name} | score {_format_float(match.score)}"
+        ):
+            explorer_view = build_factor_explorer_view(
+                match.record,
+                report_summaries=[
+                    match.report_summary
+                ] if match.report_summary is not None else [],
+            )
+            _render_factor_explorer(st, explorer_view)
 
 
 def _section_frame(section: Mapping[str, Any]) -> pd.DataFrame:

@@ -1221,8 +1221,38 @@ Dashboard
 Factor Explorer
 ```
 
-The Factor Explorer intentionally uses existing memory and report artifacts.
-It does not perform semantic retrieval; that remains scoped to Day 29.
+The Factor Explorer uses existing memory and report artifacts. Semantic
+retrieval is implemented in Day 29.
+
+## Day 29 --- Semantic Search UI
+
+Implemented in `quant-agent/`:
+
+-   `DashboardPaths.memory_index_path` and
+    `DashboardPaths.memory_index_metadata_path` for saved FAISS artifacts
+-   `SemanticSearchMatchView` and `SemanticSearchView` for dashboard-ready
+    search state
+-   `run_semantic_memory_search(...)` for querying the saved
+    `factor_memory.faiss` index
+-   `build_semantic_search_view(...)` for converting `MemorySearchResult`
+    objects into UI rows
+-   a `Semantic Search` tab in `dashboard.py`
+-   search result rows with rank, score, factor name, memory ID, benchmark
+    status, matched report, and expandable Factor Explorer detail
+-   tests for blank queries, missing index handling, successful FAISS search,
+    report matching, and result metadata preservation
+
+Current dashboard tabs:
+
+```text
+Dashboard
+Factor Explorer
+Semantic Search
+```
+
+Day 29 uses the deterministic local FAISS/hash embedding index already produced
+by `MemoryAgent`. It does not add a new embedding provider or rebuild indexes
+from the UI. Day 30 remains scoped to the end-to-end integration test.
 
 ------------------------------------------------------------------------
 
