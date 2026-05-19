@@ -1158,7 +1158,43 @@ next_action = Build Streamlit dashboard in Day 27.
 ```
 
 Day 26 intentionally stops at Markdown report generation. Dashboard/UI work is
-scoped to Day 27.
+implemented in Day 27.
+
+## Day 27 --- Streamlit Dashboard
+
+Implemented in `quant-agent/`:
+
+-   `dashboard.py` Streamlit entrypoint
+-   `DashboardPaths` for memory, wiki, and report artifact locations
+-   `load_dashboard_data(...)` for loading:
+    -   `memory/factor_memory.jsonl`
+    -   `memory/factor_wiki.md`
+    -   `research_logs/*.md`
+-   `build_factor_ranking_frame(...)` for ranking factors by RankIC and Sharpe
+-   `build_metric_distribution_frame(...)` for IC and Sharpe histogram data
+-   `build_dashboard_summary(...)` for top-level dashboard counters
+-   structured logs for artifact loading and dashboard rendering
+-   tests for path resolution, artifact loading, factor ranking, metric
+    distributions, report summaries, and dashboard counters
+
+Dashboard command:
+
+```bash
+streamlit run dashboard.py
+```
+
+Current dashboard surfaces:
+
+```text
+Records / Factors / Passed / Failed / Reports
+Factor Ranking
+IC Distribution
+Sharpe Distribution
+Generated Reports
+```
+
+Day 27 intentionally stops at the overview dashboard. Factor Explorer remains
+scoped to Day 28, and semantic search UI remains scoped to Day 29.
 
 ------------------------------------------------------------------------
 

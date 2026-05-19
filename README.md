@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-26：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引、factor wiki 保存、ReportAgent 结构化草稿和 Markdown 报告落盘。
+> 当前项目处于早期搭建阶段。已完成 Day 1-27：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引、factor wiki 保存、ReportAgent 结构化草稿、Markdown 报告落盘和 Streamlit dashboard。
 
 ## Why This Project
 
@@ -72,11 +72,13 @@ Implemented:
 - Markdown factor wiki generation from saved memory records
 - `ReportAgent` for building structured research report drafts from factor memory
 - Markdown report rendering and file persistence from `ReportAgent` drafts
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, FAISS memory retrieval, factor wiki generation, ReportAgent behavior, and Markdown report generation
+- Streamlit dashboard for factor ranking, IC distribution, Sharpe distribution, and generated report inventory
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, FAISS memory retrieval, factor wiki generation, ReportAgent behavior, Markdown report generation, and dashboard data models
 
 Not implemented yet:
 
-- Streamlit dashboard
+- Factor Explorer
+- semantic search UI
 
 ## Project Structure
 
@@ -131,6 +133,7 @@ Not implemented yet:
     ├── skills/
     ├── tests/
     ├── app.py
+    ├── dashboard.py
     ├── requirements.txt
     └── requirements-dev.txt
 ```
@@ -177,6 +180,12 @@ Run the application smoke test:
 python app.py
 ```
 
+Run the Streamlit dashboard:
+
+```bash
+streamlit run dashboard.py
+```
+
 Expected log format:
 
 ```text
@@ -188,7 +197,7 @@ Run tests and checks:
 ```bash
 python -m pytest
 python -m ruff check .
-python -m mypy core agents tests app.py
+python -m mypy core agents tests app.py dashboard.py
 ```
 
 ## DataAgent Example
@@ -620,8 +629,8 @@ result = FactorWikiStore("memory/factor_wiki.md").save(records)
 print(result.to_dict())
 ```
 
-Day 24 saves the wiki, Day 25 builds structured report drafts, and Day 26
-renders those drafts to Markdown files.
+Day 24 saves the wiki, Day 25 builds structured report drafts, Day 26 renders
+those drafts to Markdown files, and Day 27 adds the Streamlit dashboard.
 
 ## ReportAgent Example
 
@@ -701,8 +710,9 @@ Week 1:
 - Day 24: factor wiki markdown
 - Day 25: ReportAgent structured draft
 - Day 26: Markdown report generation
+- Day 27: Streamlit dashboard
 
-Next step: Streamlit dashboard.
+Next step: Factor Explorer.
 
 ## Engineering Principles
 
