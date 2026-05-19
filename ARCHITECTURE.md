@@ -1252,7 +1252,30 @@ Semantic Search
 
 Day 29 uses the deterministic local FAISS/hash embedding index already produced
 by `MemoryAgent`. It does not add a new embedding provider or rebuild indexes
-from the UI. Day 30 remains scoped to the end-to-end integration test.
+from the UI. Day 30 adds the end-to-end integration test.
+
+## Day 30 --- End-To-End Integration Test
+
+Implemented in `quant-agent/`:
+
+-   `tests/test_end_to_end.py`
+-   offline market data provider and trading calendar provider fixtures
+-   a full artifact pipeline:
+    -   `DataAgent` writes raw, processed, aligned OHLCV, DuckDB rows, and cache
+    -   `FeatureAgent` computes `factor__close_to_open_return` and writes a
+        generated factor matrix plus manifest
+    -   `BacktestAgent` consumes the factor manifest, computes IC, RankIC,
+        Sharpe, drawdown, benchmark tests, and result JSON
+    -   `MemoryAgent` writes JSONL memory, FAISS index, index metadata, and
+        factor wiki
+    -   `ReportAgent` renders and persists the Markdown report
+    -   dashboard data models load ranking, explorer, and semantic search views
+-   assertions that all key artifacts exist and cross-agent IDs/paths remain
+    usable by downstream agents
+
+The test is intentionally offline and deterministic. It validates integration
+contracts and artifact handoffs without relying on live AkShare availability.
+Live-data orchestration and production scheduling remain future hardening work.
 
 ------------------------------------------------------------------------
 
