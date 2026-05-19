@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-30：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引、factor wiki 保存、ReportAgent 结构化草稿、Markdown 报告落盘、Streamlit dashboard、Factor Explorer、semantic search UI 和端到端集成测试。
+> 当前项目处于早期搭建阶段。已完成 Day 1-30：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引、factor wiki 保存、ReportAgent 结构化草稿、Markdown 报告落盘、Streamlit dashboard、Factor Explorer、semantic search UI 和端到端集成测试。Post-MVP 已开始补强自用实盘研究所需的数据可靠性能力。
 
 ## Why This Project
 
@@ -53,6 +53,7 @@ Implemented:
 - aligned data CSV persistence
 - DuckDB persistence for aligned OHLCV and run metadata
 - file-backed market data cache with cache-hit and force-refresh behavior
+- per-symbol market data retry, partial-success handling, and failed-symbol manifests
 - `HypothesisAgent` for structured alpha hypothesis generation
 - symbolic factor template library for Day 10 feature computation
 - `FeatureAgent` for computing template-based factor values from aligned OHLCV data
@@ -81,6 +82,8 @@ Implemented:
 Not implemented yet:
 
 - production live-data orchestration
+- real AkShare diagnostic smoke test
+- provider request throttling for larger daily universes
 
 ## Project Structure
 
@@ -90,6 +93,7 @@ Not implemented yet:
 ├── PROMPT.md
 ├── TASKS.md
 ├── README.md
+├── TODO.md
 └── quant-agent/
     ├── agents/
     │   ├── __init__.py
@@ -119,6 +123,7 @@ Not implemented yet:
     ├── data/
     │   ├── raw/
     │   ├── processed/
+    │   ├── failures/
     │   └── cache/
     ├── factors/
     │   ├── generated/
@@ -210,7 +215,11 @@ OHLCV data through AkShare, normalizes the schema, writes a raw CSV into
 `data/processed/`. It then aligns processed data to the exchange trading
 calendar and writes an `aligned_*.csv` file into `data/processed/`.
 Finally, it persists aligned rows and run metadata into DuckDB and caches the
-successful output manifest under `data/cache/market_data/`.
+successful output manifest under `data/cache/market_data/`. Provider downloads
+retry per symbol, can continue when only part of the universe fails, and save
+failed-symbol diagnostics under `data/failures/`. Partial downloads are not
+written to the market-data cache, so future identical requests can retry the
+missing symbols.
 
 ```python
 from agents.data_agent import DataAgent
@@ -223,6 +232,9 @@ request = AgentRequest.create(
         "end_date": "2025-12-31",
         "frequency": "daily",
         "provider": "akshare",
+        "max_retries": 2,
+        "retry_backoff_sec": 0.5,
+        "continue_on_symbol_error": True,
     }
 )
 

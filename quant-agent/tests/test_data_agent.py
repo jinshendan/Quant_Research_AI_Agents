@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date
 from io import StringIO
 from pathlib import Path
@@ -99,6 +100,9 @@ def test_market_data_spec_normalizes_valid_payload() -> None:
         "adjust": "qfq",
         "use_cache": True,
         "force_refresh": False,
+        "max_retries": 2,
+        "retry_backoff_sec": 0.5,
+        "continue_on_symbol_error": True,
     }
 
 
@@ -151,12 +155,16 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     assert response.output["processed_rows"] == 2
     assert response.output["aligned_rows"] == 6
     assert response.output["symbols"] == ["000001", "000002"]
+    assert response.output["successful_symbols"] == ["000001", "000002"]
+    assert response.output["failed_symbols"] == []
     assert response.output["request"]["provider"] == "akshare"
     assert Path(response.output["raw_data_path"]).is_file()
     assert Path(response.output["processed_data_path"]).is_file()
     assert Path(response.output["aligned_data_path"]).is_file()
     assert response.output["cleaning_stats"]["suspended_rows"] == 0
     assert response.output["calendar_stats"]["missing_or_suspended_rows"] == 4
+    assert response.output["download_stats"]["failed_symbol_count"] == 0
+    assert response.output["failure_manifest_path"] is None
     assert response.output["storage_stats"]["rows_written"] == 6
     assert response.output["cache_stats"]["status"] == "refreshed"
     assert Path(response.output["storage_stats"]["database_path"]).is_file()
@@ -165,6 +173,7 @@ def test_data_agent_run_downloads_and_stores_raw_data(tmp_path: Path) -> None:
     assert response.metadata["rows"] == 6
     assert response.metadata["cleaning_stats"]["output_rows"] == 2
     assert response.metadata["calendar_stats"]["output_rows"] == 6
+    assert response.metadata["download_stats"]["successful_symbol_count"] == 2
     assert response.metadata["storage_stats"]["rows_written"] == 6
     assert response.metadata["cache_stats"]["status"] == "refreshed"
     assert (tmp_path / "data" / "raw").is_dir()
@@ -297,6 +306,153 @@ def test_data_agent_download_ohlcv_uses_explicit_symbols(tmp_path: Path) -> None
 
     assert len(market_data) == 1
     assert market_data.iloc[0]["symbol"] == "000001"
+
+
+def test_data_agent_retries_transient_symbol_failure(tmp_path: Path) -> None:
+    stream = StringIO()
+    configure_logging(stream=stream)
+    provider = FlakyMarketDataProvider(failures_before_success={"000001": 1})
+    agent = DataAgent(
+        config=_config(tmp_path),
+        logger=get_agent_logger("DataAgent"),
+        providers={"akshare": provider},
+        calendar_providers={"akshare": FakeTradingCalendarProvider()},
+    )
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "universe": "CSI500",
+                "start_date": "2020-01-01",
+                "end_date": "2025-12-31",
+                "max_retries": 1,
+                "retry_backoff_sec": 0.0,
+            },
+            task_id="data-retry-1",
+        )
+    )
+
+    assert response.status == "success"
+    assert provider.download_attempts["000001"] == 2
+    assert provider.download_attempts["000002"] == 1
+    assert response.output["download_stats"]["retry_attempts"] == 1
+    assert response.output["download_stats"]["failed_symbol_count"] == 0
+    assert response.output["failure_manifest_path"] is None
+    assert "DataAgent | download_symbol_ohlcv | retry" in stream.getvalue()
+    assert "DataAgent | download_symbol_ohlcv | recovered" in stream.getvalue()
+
+
+def test_data_agent_isolates_failed_symbols_and_writes_manifest(
+    tmp_path: Path,
+) -> None:
+    provider = FlakyMarketDataProvider(always_fail={"000002"})
+    agent = DataAgent(
+        config=_config(tmp_path),
+        providers={"akshare": provider},
+        calendar_providers={"akshare": FakeTradingCalendarProvider()},
+    )
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "universe": "CSI500",
+                "start_date": "2020-01-01",
+                "end_date": "2025-12-31",
+                "max_retries": 1,
+                "retry_backoff_sec": 0.0,
+            },
+            task_id="data-partial-1",
+        )
+    )
+
+    assert response.status == "success"
+    assert response.output["symbols"] == ["000001", "000002"]
+    assert response.output["successful_symbols"] == ["000001"]
+    assert response.output["failed_symbols"] == ["000002"]
+    assert response.output["raw_rows"] == 1
+    assert response.output["aligned_rows"] == 3
+    assert response.output["download_stats"]["requested_symbol_count"] == 2
+    assert response.output["download_stats"]["successful_symbol_count"] == 1
+    assert response.output["download_stats"]["failed_symbol_count"] == 1
+    assert response.output["download_stats"]["retry_attempts"] == 1
+    assert response.output["cache_stats"]["status"] == "skipped"
+    assert response.output["cache_stats"]["reason"] == "partial_download"
+    assert not Path(response.output["cache_stats"]["cache_path"]).exists()
+    assert response.metadata["failure_manifest_path"] == response.output[
+        "failure_manifest_path"
+    ]
+
+    manifest_path = Path(response.output["failure_manifest_path"])
+    assert manifest_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 1
+    assert manifest["task_id"] == "data-partial-1"
+    assert manifest["download_stats"]["failed_symbols"] == ["000002"]
+    assert manifest["download_stats"]["failures"][0]["attempts"] == 2
+    assert manifest["download_stats"]["failures"][0]["error_type"] == "RuntimeError"
+
+
+def test_data_agent_returns_error_when_all_symbols_fail(tmp_path: Path) -> None:
+    agent = DataAgent(
+        config=_config(tmp_path),
+        providers={"akshare": FlakyMarketDataProvider(always_fail={"000001", "000002"})},
+        calendar_providers={"akshare": FakeTradingCalendarProvider()},
+    )
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "universe": "CSI500",
+                "start_date": "2020-01-01",
+                "end_date": "2025-12-31",
+                "max_retries": 1,
+                "retry_backoff_sec": 0.0,
+            },
+            task_id="data-all-fail",
+        )
+    )
+
+    assert response.status == "error"
+    assert "No OHLCV data downloaded" in str(response.error)
+    assert "000001" in str(response.error)
+    assert "000002" in str(response.error)
+
+
+class FlakyMarketDataProvider(FakeMarketDataProvider):
+    def __init__(
+        self,
+        *,
+        failures_before_success: dict[str, int] | None = None,
+        always_fail: set[str] | None = None,
+    ) -> None:
+        super().__init__()
+        self.failures_before_success = dict(failures_before_success or {})
+        self.always_fail = set(always_fail or set())
+        self.download_attempts: dict[str, int] = {}
+
+    def download_symbol_ohlcv(
+        self,
+        *,
+        symbol: str,
+        start_date,
+        end_date,
+        frequency: str,
+        adjust: str,
+    ) -> pd.DataFrame:
+        self.download_attempts[symbol] = self.download_attempts.get(symbol, 0) + 1
+        if symbol in self.always_fail:
+            raise RuntimeError(f"transient provider failure for {symbol}")
+        failures_remaining = self.failures_before_success.get(symbol, 0)
+        if failures_remaining > 0:
+            self.failures_before_success[symbol] = failures_remaining - 1
+            raise RuntimeError(f"transient provider failure for {symbol}")
+        return super().download_symbol_ohlcv(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            frequency=frequency,
+            adjust=adjust,
+        )
 
 
 class ExplodingMarketDataProvider:

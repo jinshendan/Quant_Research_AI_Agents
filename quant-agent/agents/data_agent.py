@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import copy
+import json
+import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Any
 
 import pandas as pd
@@ -40,6 +42,11 @@ from agents.trading_calendar import (
 SUPPORTED_FREQUENCIES = {"daily"}
 SUPPORTED_PROVIDERS = {"akshare"}
 SUPPORTED_ADJUSTMENTS = {"", "qfq", "hfq"}
+DEFAULT_DOWNLOAD_MAX_RETRIES = 2
+DEFAULT_DOWNLOAD_RETRY_BACKOFF_SEC = 0.5
+MAX_DOWNLOAD_RETRIES = 5
+MAX_DOWNLOAD_RETRY_BACKOFF_SEC = 60.0
+DOWNLOAD_FAILURE_MANIFEST_SCHEMA_VERSION = 1
 
 _SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -57,6 +64,9 @@ class MarketDataSpec:
     adjust: str = ""
     use_cache: bool = True
     force_refresh: bool = False
+    max_retries: int = DEFAULT_DOWNLOAD_MAX_RETRIES
+    retry_backoff_sec: float = DEFAULT_DOWNLOAD_RETRY_BACKOFF_SEC
+    continue_on_symbol_error: bool = True
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> MarketDataSpec:
@@ -69,6 +79,25 @@ class MarketDataSpec:
         adjust = _optional_adjust(payload)
         use_cache = _optional_bool(payload, "use_cache", True)
         force_refresh = _optional_bool_alias(payload, ("force_refresh", "refresh_cache"), False)
+        max_retries = _optional_int(
+            payload,
+            "max_retries",
+            DEFAULT_DOWNLOAD_MAX_RETRIES,
+            minimum=0,
+            maximum=MAX_DOWNLOAD_RETRIES,
+        )
+        retry_backoff_sec = _optional_float(
+            payload,
+            "retry_backoff_sec",
+            DEFAULT_DOWNLOAD_RETRY_BACKOFF_SEC,
+            minimum=0.0,
+            maximum=MAX_DOWNLOAD_RETRY_BACKOFF_SEC,
+        )
+        continue_on_symbol_error = _optional_bool(
+            payload,
+            "continue_on_symbol_error",
+            True,
+        )
 
         if end_date < start_date:
             msg = "end_date must be greater than or equal to start_date."
@@ -93,6 +122,9 @@ class MarketDataSpec:
             adjust=adjust,
             use_cache=use_cache,
             force_refresh=force_refresh,
+            max_retries=max_retries,
+            retry_backoff_sec=retry_backoff_sec,
+            continue_on_symbol_error=continue_on_symbol_error,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -106,6 +138,54 @@ class MarketDataSpec:
             "adjust": self.adjust,
             "use_cache": self.use_cache,
             "force_refresh": self.force_refresh,
+            "max_retries": self.max_retries,
+            "retry_backoff_sec": self.retry_backoff_sec,
+            "continue_on_symbol_error": self.continue_on_symbol_error,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SymbolDownloadFailure:
+    """One failed symbol download after all retry attempts."""
+
+    symbol: str
+    attempts: int
+    error_type: str
+    error_message: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "attempts": self.attempts,
+            "error_type": self.error_type,
+            "error_message": self.error_message,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class OhlcvDownloadResult:
+    """Downloaded OHLCV rows plus symbol-level reliability details."""
+
+    data: pd.DataFrame
+    requested_symbols: tuple[str, ...]
+    successful_symbols: tuple[str, ...]
+    failures: tuple[SymbolDownloadFailure, ...]
+    retry_attempts: int = 0
+
+    @property
+    def failed_symbols(self) -> tuple[str, ...]:
+        return tuple(failure.symbol for failure in self.failures)
+
+    def stats(self) -> dict[str, Any]:
+        return {
+            "requested_symbol_count": len(self.requested_symbols),
+            "successful_symbol_count": len(self.successful_symbols),
+            "failed_symbol_count": len(self.failures),
+            "requested_symbols": list(self.requested_symbols),
+            "successful_symbols": list(self.successful_symbols),
+            "failed_symbols": list(self.failed_symbols),
+            "retry_attempts": self.retry_attempts,
+            "failures": [failure.to_dict() for failure in self.failures],
         }
 
 
@@ -172,6 +252,10 @@ class DataAgent:
                         calendar_stats=output.get("calendar_stats"),
                         storage_stats=output.get("storage_stats"),
                         cache_stats=output.get("cache_stats"),
+                        download_stats=output.get("download_stats"),
+                        failure_manifest_path=_optional_path(
+                            output.get("failure_manifest_path")
+                        ),
                     ),
                 )
 
@@ -195,7 +279,17 @@ class DataAgent:
         )
 
         try:
-            market_data = self.download_ohlcv(spec, symbols=symbols, provider=provider)
+            download_result = self.download_ohlcv_with_reliability(
+                spec,
+                symbols=symbols,
+                provider=provider,
+            )
+            market_data = download_result.data
+            failure_manifest_path = self.save_download_failure_manifest(
+                download_result,
+                spec,
+                task_id=request.task_id,
+            )
             raw_data_path = self.save_raw_ohlcv(market_data, spec)
             clean_result = clean_ohlcv(market_data)
             processed_data_path = self.save_processed_ohlcv(clean_result.data, spec)
@@ -205,7 +299,7 @@ class DataAgent:
             )
             calendar_result = align_to_trading_calendar(
                 clean_result.data,
-                symbols=symbols,
+                symbols=download_result.successful_symbols,
                 trading_days=trading_days,
             )
             aligned_data_path = self.save_aligned_ohlcv(calendar_result.data, spec)
@@ -257,6 +351,8 @@ class DataAgent:
             "state": "stored",
             "request": spec.to_dict(),
             "symbols": symbols,
+            "successful_symbols": list(download_result.successful_symbols),
+            "failed_symbols": list(download_result.failed_symbols),
             "raw_rows": len(market_data),
             "processed_rows": len(clean_result.data),
             "aligned_rows": len(calendar_result.data),
@@ -266,10 +362,23 @@ class DataAgent:
             "aligned_data_path": str(aligned_data_path),
             "cleaning_stats": clean_result.stats,
             "calendar_stats": calendar_result.stats,
+            "download_stats": download_result.stats(),
+            "failure_manifest_path": (
+                str(failure_manifest_path) if failure_manifest_path else None
+            ),
             "storage_stats": storage_result.to_dict(),
             "next_action": "Build HypothesisAgent in Day 8.",
         }
-        if spec.use_cache:
+        if spec.use_cache and download_result.failures:
+            output["cache_stats"] = self.market_data_cache.skipped_stats(
+                cache_identity,
+                reason="partial_download",
+            )
+            self.logger.info(
+                "Market data cache skipped for partial download.",
+                extra={"action": "cache_write", "status": "skipped"},
+            )
+        elif spec.use_cache:
             try:
                 cache_entry = self.market_data_cache.store(cache_identity, output)
                 output = cache_entry.output
@@ -293,6 +402,8 @@ class DataAgent:
                         aligned_data_path=aligned_data_path,
                         cleaning_stats=clean_result.stats,
                         calendar_stats=calendar_result.stats,
+                        download_stats=download_result.stats(),
+                        failure_manifest_path=failure_manifest_path,
                         storage_result=storage_result,
                     ),
                 )
@@ -317,6 +428,8 @@ class DataAgent:
                 aligned_data_path=aligned_data_path,
                 cleaning_stats=clean_result.stats,
                 calendar_stats=calendar_result.stats,
+                download_stats=download_result.stats(),
+                failure_manifest_path=failure_manifest_path,
                 storage_result=storage_result,
                 cache_stats=output.get("cache_stats"),
             ),
@@ -329,28 +442,156 @@ class DataAgent:
         symbols: Sequence[str] | None = None,
         provider: MarketDataProvider | None = None,
     ) -> pd.DataFrame:
-        selected_provider = provider or self._provider_for(spec.provider)
-        selected_symbols = list(symbols) if symbols is not None else list(spec.symbols)
-        if not selected_symbols:
-            selected_symbols = selected_provider.resolve_symbols(spec.universe)
+        return self.download_ohlcv_with_reliability(
+            spec,
+            symbols=symbols,
+            provider=provider,
+        ).data
 
-        frames = []
+    def download_ohlcv_with_reliability(
+        self,
+        spec: MarketDataSpec,
+        *,
+        symbols: Sequence[str] | None = None,
+        provider: MarketDataProvider | None = None,
+    ) -> OhlcvDownloadResult:
+        selected_provider = provider or self._provider_for(spec.provider)
+        selected_symbols = tuple(symbols if symbols is not None else spec.symbols)
+        if not selected_symbols:
+            selected_symbols = tuple(selected_provider.resolve_symbols(spec.universe))
+
+        frames: list[pd.DataFrame] = []
+        successful_symbols: list[str] = []
+        failures: list[SymbolDownloadFailure] = []
+        retry_attempts = 0
         for symbol in selected_symbols:
+            frame, failure, attempts = self._download_symbol_with_retries(
+                spec,
+                symbol=symbol,
+                provider=selected_provider,
+            )
+            retry_attempts += max(0, attempts - 1)
+            if failure is not None:
+                failures.append(failure)
+                if not spec.continue_on_symbol_error:
+                    msg = (
+                        f"OHLCV download failed for {symbol} after "
+                        f"{failure.attempts} attempts: {failure.error_message}"
+                    )
+                    raise RuntimeError(msg)
+                continue
+            if frame is not None:
+                frames.append(frame)
+                successful_symbols.append(symbol)
+
+        if failures:
+            self.logger.warning(
+                "Some OHLCV symbol downloads failed.",
+                extra={"action": "download_symbol_ohlcv", "status": "partial"},
+            )
+        if not frames:
+            failed_symbols = ", ".join(failure.symbol for failure in failures) or "none"
+            msg = f"No OHLCV data downloaded. Failed symbols: {failed_symbols}."
+            raise RuntimeError(msg)
+
+        return OhlcvDownloadResult(
+            data=combine_ohlcv_frames(frames).reset_index(drop=True),
+            requested_symbols=selected_symbols,
+            successful_symbols=tuple(successful_symbols),
+            failures=tuple(failures),
+            retry_attempts=retry_attempts,
+        )
+
+    def save_download_failure_manifest(
+        self,
+        result: OhlcvDownloadResult,
+        spec: MarketDataSpec,
+        *,
+        task_id: str,
+    ) -> Path | None:
+        if not result.failures:
+            return None
+
+        output_path = self._download_failure_manifest_path(spec, task_id=task_id)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        document = {
+            "schema_version": DOWNLOAD_FAILURE_MANIFEST_SCHEMA_VERSION,
+            "task_id": task_id,
+            "request": spec.to_dict(),
+            "download_stats": result.stats(),
+        }
+        temp_path = Path(f"{output_path}.tmp")
+        temp_path.write_text(
+            json.dumps(
+                document,
+                ensure_ascii=True,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(output_path)
+        return output_path
+
+    def _download_symbol_with_retries(
+        self,
+        spec: MarketDataSpec,
+        *,
+        symbol: str,
+        provider: MarketDataProvider,
+    ) -> tuple[pd.DataFrame | None, SymbolDownloadFailure | None, int]:
+        max_attempts = spec.max_retries + 1
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
             self.logger.info(
                 f"Downloading OHLCV for {symbol}.",
                 extra={"action": "download_symbol_ohlcv", "status": "running"},
             )
-            frames.append(
-                selected_provider.download_symbol_ohlcv(
+            try:
+                frame = provider.download_symbol_ohlcv(
                     symbol=symbol,
                     start_date=spec.start_date,
                     end_date=spec.end_date,
                     frequency=spec.frequency,
                     adjust=spec.adjust,
                 )
-            )
+            except Exception as exc:  # noqa: BLE001 - provider boundary isolation.
+                last_exc = exc
+                if attempt < max_attempts:
+                    self.logger.warning(
+                        f"Retrying OHLCV download for {symbol}.",
+                        extra={"action": "download_symbol_ohlcv", "status": "retry"},
+                    )
+                    backoff = spec.retry_backoff_sec * (2 ** (attempt - 1))
+                    if backoff > 0:
+                        sleep(backoff)
+                    continue
+                break
+            else:
+                if attempt > 1:
+                    self.logger.info(
+                        f"OHLCV download for {symbol} recovered after retry.",
+                        extra={
+                            "action": "download_symbol_ohlcv",
+                            "status": "recovered",
+                        },
+                    )
+                return frame, None, attempt
 
-        return combine_ohlcv_frames(frames).reset_index(drop=True)
+        if last_exc is None:
+            last_exc = RuntimeError("Unknown provider failure.")
+        failure = SymbolDownloadFailure(
+            symbol=symbol,
+            attempts=max_attempts,
+            error_type=type(last_exc).__name__,
+            error_message=str(last_exc),
+        )
+        self.logger.warning(
+            f"OHLCV download failed for {symbol}.",
+            extra={"action": "download_symbol_ohlcv", "status": "failed"},
+        )
+        return None, failure, max_attempts
 
     def save_raw_ohlcv(self, market_data: pd.DataFrame, spec: MarketDataSpec) -> Path:
         output_path = self._raw_ohlcv_path(spec)
@@ -435,6 +676,8 @@ class DataAgent:
         storage_result: MarketDataStorageResult | None = None,
         storage_stats: Mapping[str, Any] | None = None,
         cache_stats: Mapping[str, Any] | None = None,
+        download_stats: Mapping[str, Any] | None = None,
+        failure_manifest_path: Path | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
             "agent": self.name,
@@ -468,6 +711,10 @@ class DataAgent:
             metadata["storage_stats"] = dict(storage_stats)
         if cache_stats is not None:
             metadata["cache_stats"] = dict(cache_stats)
+        if download_stats is not None:
+            metadata["download_stats"] = dict(download_stats)
+        if failure_manifest_path is not None:
+            metadata["failure_manifest_path"] = str(failure_manifest_path)
         return metadata
 
     def _provider_for(self, provider_name: str) -> MarketDataProvider:
@@ -493,6 +740,13 @@ class DataAgent:
     def _aligned_ohlcv_path(self, spec: MarketDataSpec) -> Path:
         return self.config.processed_data_dir / f"aligned_{self._ohlcv_filename(spec)}"
 
+    def _download_failure_manifest_path(self, spec: MarketDataSpec, *, task_id: str) -> Path:
+        safe_task_id = _safe_filename(task_id)
+        ohlcv_stem = self._ohlcv_filename(spec).removesuffix(".csv")
+        return self.config.data_dir / "failures" / (
+            f"download_failures_{safe_task_id}_{ohlcv_stem}.json"
+        )
+
     def _ohlcv_filename(self, spec: MarketDataSpec) -> str:
         safe_universe = _safe_filename(spec.universe)
         adjustment = spec.adjust or "none"
@@ -516,6 +770,46 @@ def _optional_str(payload: Mapping[str, Any], key: str, default: str) -> str:
         msg = f"payload.{key} must be a non-empty string."
         raise ValueError(msg)
     return value.strip().lower()
+
+
+def _optional_int(
+    payload: Mapping[str, Any],
+    key: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        msg = f"payload.{key} must be an integer."
+        raise ValueError(msg)
+    if value < minimum or value > maximum:
+        msg = f"payload.{key} must be between {minimum} and {maximum}."
+        raise ValueError(msg)
+    return value
+
+
+def _optional_float(
+    payload: Mapping[str, Any],
+    key: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        msg = f"payload.{key} must be a finite number."
+        raise ValueError(msg)
+    normalized = float(value)
+    if not math.isfinite(normalized):
+        msg = f"payload.{key} must be a finite number."
+        raise ValueError(msg)
+    if normalized < minimum or normalized > maximum:
+        msg = f"payload.{key} must be between {minimum} and {maximum}."
+        raise ValueError(msg)
+    return normalized
 
 
 def _optional_bool(payload: Mapping[str, Any], key: str, default: bool) -> bool:

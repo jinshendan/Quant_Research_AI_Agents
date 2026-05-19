@@ -205,6 +205,20 @@ class MarketDataCache:
             "reason": "force_refresh",
         }
 
+    def skipped_stats(
+        self,
+        identity: MarketDataCacheIdentity,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        cache_key = self.cache_key(identity)
+        return {
+            "status": "skipped",
+            "cache_key": cache_key,
+            "cache_path": str(self.cache_path(cache_key)),
+            "reason": reason,
+        }
+
     def cache_key(self, identity: MarketDataCacheIdentity) -> str:
         payload = {
             "cache_schema_version": CACHE_SCHEMA_VERSION,

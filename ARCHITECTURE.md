@@ -1277,6 +1277,29 @@ The test is intentionally offline and deterministic. It validates integration
 contracts and artifact handoffs without relying on live AkShare availability.
 Live-data orchestration and production scheduling remain future hardening work.
 
+## Post-MVP Data Reliability --- Provider Retry + Partial Success
+
+Implemented in `quant-agent/`:
+
+-   `MarketDataSpec.max_retries`, `retry_backoff_sec`, and
+    `continue_on_symbol_error` controls for provider downloads
+-   `OhlcvDownloadResult` and `SymbolDownloadFailure` models for separating
+    downloaded rows from symbol-level reliability details
+-   per-symbol retry with exponential backoff inside `DataAgent`
+-   partial-success handling so one failed symbol does not discard the whole
+    universe when other symbols downloaded successfully
+-   cache-write skipping for partial downloads so transient provider failures
+    are retried by future identical requests instead of cached as complete data
+-   failed-symbol manifests under `data/failures/`
+-   DataAgent output and metadata fields for `successful_symbols`,
+    `failed_symbols`, `download_stats`, and `failure_manifest_path`
+-   tests for transient recovery, partial failure manifests, and all-symbol
+    failure behavior
+
+Calendar alignment now runs only for successfully downloaded symbols. If all
+symbols fail, `DataAgent` returns an error instead of writing empty artifacts.
+The live AkShare smoke test and request throttling remain tracked in `TODO.md`.
+
 ------------------------------------------------------------------------
 
 # Memory Schema
