@@ -1309,6 +1309,27 @@ Calendar alignment now runs only for successfully downloaded symbols. If all
 symbols fail, `DataAgent` returns an error instead of writing empty artifacts.
 The next P0 focus is the daily research pipeline in `TODO.md`.
 
+## Post-MVP Daily Research Pipeline
+
+Implemented in `quant-agent/`:
+
+-   `DailyResearchSpec` for validating `.json` or `.toml` pipeline configs
+-   `run_daily_research(...)` for orchestrating:
+    `DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent -> ReportAgent`
+-   `scripts/run_daily_research.py` CLI for running the pipeline from a config
+    file
+-   per-run output directory under `output_dir/run_id/`
+-   `daily_research_manifest.json` with schema version, stage summaries,
+    artifact paths, request echo, elapsed time, status, and error details
+-   terminal summary with run status, manifest path, factor column, benchmark
+    status, memory ID, and report path
+-   offline tests for config loading, success manifest generation, and error
+    manifest generation
+
+The script intentionally consumes the existing agent interfaces instead of
+adding a separate orchestration framework. Ranking output remains the next P0
+task in `TODO.md`.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

@@ -20,12 +20,12 @@ Current status:
   - [x] Add a real AkShare smoke test that reports actionable diagnostics
   - [x] Add request throttling and configurable sleep between symbols
 
-- [ ] Add a daily research pipeline script
-  - [ ] Create `scripts/run_daily_research.py`
-  - [ ] Accept config for universe, symbols, date range, factor set, and output dir
-  - [ ] Run DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent -> ReportAgent
-  - [ ] Save a daily run manifest with all artifact paths
-  - [ ] Print a concise terminal summary for the day's run
+- [x] Add a daily research pipeline script
+  - [x] Create `scripts/run_daily_research.py`
+  - [x] Accept config for universe, symbols, date range, factor set, and output dir
+  - [x] Run DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent -> ReportAgent
+  - [x] Save a daily run manifest with all artifact paths
+  - [x] Print a concise terminal summary for the day's run
 
 - [ ] Build a practical daily stock ranking output
   - [ ] Generate Top N candidate stocks after market close
@@ -133,8 +133,8 @@ Current status:
 
 Continue P0 daily usability:
 
-1. Build the daily research pipeline script.
-2. Then generate a practical daily stock ranking output.
+1. Generate a practical daily stock ranking output.
+2. Then add A-share trading constraints and transaction cost realism.
 
 This is the most direct path from the current offline MVP to useful daily
 self-directed trading research.

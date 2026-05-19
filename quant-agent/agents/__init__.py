@@ -25,6 +25,13 @@ from agents.akshare_smoke import (
     run_akshare_smoke,
 )
 from agents.data_agent import DataAgent, MarketDataSpec
+from agents.daily_research import (
+    DailyResearchRunResult,
+    DailyResearchSpec,
+    format_daily_research_summary,
+    load_daily_research_config,
+    run_daily_research,
+)
 from agents.duckdb_store import (
     DuckDBMarketDataStore,
     MarketDataStorageContext,
@@ -125,6 +132,8 @@ __all__ = [
     "BacktestSpec",
     "CalendarAlignmentResult",
     "DataAgent",
+    "DailyResearchRunResult",
+    "DailyResearchSpec",
     "DuckDBMarketDataStore",
     "DrawdownResult",
     "FactorBatchResult",
@@ -191,9 +200,12 @@ __all__ = [
     "compute_rank_information_coefficient",
     "compute_sharpe_ratio",
     "generate_backtest_result_json",
+    "format_daily_research_summary",
+    "load_daily_research_config",
     "memory_record_to_text",
     "render_report_markdown",
     "run_benchmark_tests",
+    "run_daily_research",
     "run_akshare_smoke",
     "save_markdown_report",
     "save_backtest_result_json",

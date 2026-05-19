@@ -52,6 +52,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | Factor Explorer | 已实现 | 查看单个因子记录、诊断和关联报告 |
 | Semantic Search UI | 已实现 | dashboard 中搜索历史因子记忆 |
 | 端到端离线测试 | 已实现 | 覆盖 DataAgent 到 Dashboard/Search 的 artifact handoff |
+| Daily research pipeline | 已实现 | 配置驱动运行 DataAgent 到 ReportAgent 并保存 manifest |
 
 ### 核心模块
 
@@ -63,6 +64,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | 保存因子研究记录和 FAISS 索引 |
 | ReportAgent | `quant-agent/agents/report_agent.py` | 生成 Markdown 研究报告 |
+| Daily Research | `quant-agent/scripts/run_daily_research.py` | 串联每日研究 pipeline 并输出运行清单 |
 | Dashboard | `quant-agent/dashboard.py` | 交互式查看因子、报告和语义搜索 |
 | AkShare Smoke | `quant-agent/scripts/run_akshare_smoke.py` | 真实 AkShare 连接与数据质量诊断 |
 
@@ -135,6 +137,38 @@ AkShare smoke test 会输出 JSON 诊断报告到 stdout，日志输出到 stder
 - `1`: 失败
 - `2`: 部分成功，例如部分股票下载失败
 
+运行每日研究 pipeline：
+
+```bash
+python scripts/run_daily_research.py --config /path/to/daily_research.json
+```
+
+最小 JSON 配置示例：
+
+```json
+{
+  "run_id": "daily-demo",
+  "universe": "custom_batch",
+  "symbols": ["000001", "000002", "000003", "000004", "000005"],
+  "start_date": "2024-01-01",
+  "end_date": "2024-03-31",
+  "output_dir": "daily_runs",
+  "template_ids": ["close_to_open_return"],
+  "factor_set_name": "daily_demo",
+  "factor_direction": "positive",
+  "quantile_count": 5,
+  "factor_metadata": {
+    "name": "daily_close_to_open",
+    "formula": "close / open - 1",
+    "hypothesis": "Intraday strength may persist into next-day returns."
+  }
+}
+```
+
+该脚本会依次运行 `DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent
+-> ReportAgent`，并在 `output_dir/run_id/daily_research_manifest.json` 保存
+本次运行清单和关键 artifact 路径。
+
 运行 dashboard：
 
 ```bash
@@ -146,7 +180,7 @@ streamlit run dashboard.py
 ```bash
 python -m pytest
 python -m ruff check .
-python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.py
+python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.py scripts/run_daily_research.py
 ```
 
 ### 如何使用
@@ -290,7 +324,7 @@ print(report_response.output["report_path"])
 
 | 优先级 | 计划 |
 | --- | --- |
-| P0 | 构建每日研究 pipeline、生成每日候选股票排名 |
+| P0 | 生成每日候选股票排名 |
 | P0 | 加入 A 股交易约束：T+1、涨跌停、ST、停牌、新股、退市风险 |
 | P0 | 加入交易成本：佣金、印花税、过户费、滑点和换手惩罚 |
 | P1 | 加入样本外验证、walk-forward validation、因子稳健性检查 |
@@ -352,6 +386,7 @@ for real-money trading decisions.
 | Factor Explorer | Done | Single-factor diagnostics and linked reports |
 | Semantic Search UI | Done | Search historical factor memory from the dashboard |
 | End-to-end offline test | Done | DataAgent to Dashboard/Search artifact handoff |
+| Daily research pipeline | Done | Config-driven DataAgent-to-ReportAgent run with manifest |
 
 ### Core Modules
 
@@ -363,6 +398,7 @@ for real-money trading decisions.
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | Store factor research records and FAISS indexes |
 | ReportAgent | `quant-agent/agents/report_agent.py` | Generate Markdown research reports |
+| Daily Research | `quant-agent/scripts/run_daily_research.py` | Run the daily pipeline and write a run manifest |
 | Dashboard | `quant-agent/dashboard.py` | Inspect factors, reports, and semantic search results |
 | AkShare Smoke | `quant-agent/scripts/run_akshare_smoke.py` | Diagnose real AkShare connectivity and data quality |
 
@@ -409,12 +445,44 @@ Run the dashboard:
 streamlit run dashboard.py
 ```
 
+Run the daily research pipeline:
+
+```bash
+python scripts/run_daily_research.py --config /path/to/daily_research.json
+```
+
+Minimal JSON config:
+
+```json
+{
+  "run_id": "daily-demo",
+  "universe": "custom_batch",
+  "symbols": ["000001", "000002", "000003", "000004", "000005"],
+  "start_date": "2024-01-01",
+  "end_date": "2024-03-31",
+  "output_dir": "daily_runs",
+  "template_ids": ["close_to_open_return"],
+  "factor_set_name": "daily_demo",
+  "factor_direction": "positive",
+  "quantile_count": 5,
+  "factor_metadata": {
+    "name": "daily_close_to_open",
+    "formula": "close / open - 1",
+    "hypothesis": "Intraday strength may persist into next-day returns."
+  }
+}
+```
+
+The script runs `DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent ->
+ReportAgent` and writes `output_dir/run_id/daily_research_manifest.json` with
+stage summaries and artifact paths.
+
 Run tests and checks:
 
 ```bash
 python -m pytest
 python -m ruff check .
-python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.py
+python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.py scripts/run_daily_research.py
 ```
 
 ### How To Use
@@ -513,7 +581,6 @@ print(response.output["benchmark_status"])
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- build a daily research pipeline script
 - generate practical daily stock ranking output
 - add A-share trading constraints such as T+1, limit up/down, ST, suspension,
   new-stock, and delisting-risk handling
