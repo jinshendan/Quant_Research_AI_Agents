@@ -91,6 +91,13 @@ from agents.memory_index import (
     memory_record_to_text,
 )
 from agents.ohlcv_cleaner import OhlcvCleanResult, clean_ohlcv
+from agents.report_agent import (
+    ReportAgent,
+    ReportDraft,
+    ReportSpec,
+    build_report_draft,
+    select_memory_record,
+)
 from agents.trading_calendar import (
     AkShareTradingCalendarProvider,
     CalendarAlignmentResult,
@@ -153,6 +160,9 @@ __all__ = [
     "RankInformationCoefficientResult",
     "RollingFeatureResult",
     "RollingFeatureSpec",
+    "ReportAgent",
+    "ReportDraft",
+    "ReportSpec",
     "SharpeResult",
     "TradingCalendarProvider",
     "align_to_trading_calendar",
@@ -161,6 +171,7 @@ __all__ = [
     "attach_benchmark_tests_to_result_json",
     "build_factor_memory_record",
     "build_factor_wiki_markdown",
+    "build_report_draft",
     "clean_ohlcv",
     "compute_drawdown",
     "compute_information_coefficient",
@@ -170,5 +181,6 @@ __all__ = [
     "memory_record_to_text",
     "run_benchmark_tests",
     "save_backtest_result_json",
+    "select_memory_record",
     "summarize_factor_wiki_records",
 ]

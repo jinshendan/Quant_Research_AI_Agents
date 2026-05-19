@@ -13,7 +13,7 @@ evaluation, criticism, reporting, and long-term research memory.
 - 研究报告生成
 - 长期记忆与语义检索
 
-> 当前项目处于早期搭建阶段。已完成 Day 1-24：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引和 factor wiki 保存。
+> 当前项目处于早期搭建阶段。已完成 Day 1-25：项目结构、依赖环境、结构化日志、配置管理、Agent 通信协议、DataAgent 骨架、AkShare OHLCV 下载、基础清洗、交易日历对齐、DuckDB 持久化、市场数据缓存、HypothesisAgent、因子模板库、FeatureAgent、首批 50 个候选因子生成、ranking transforms、rolling-window features、generated factor matrix 持久化、BacktestAgent 回测骨架、IC、RankIC、Sharpe、Drawdown 计算、最终 result JSON 生成、benchmark tests、MemoryAgent JSONL 存储、FAISS 检索索引、factor wiki 保存和 ReportAgent 结构化草稿。
 
 ## Why This Project
 
@@ -70,11 +70,12 @@ Implemented:
 - `MemoryAgent` for writing compact factor research records to JSONL
 - FAISS vector index build and search over factor memory records
 - Markdown factor wiki generation from saved memory records
-- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, FAISS memory retrieval, and factor wiki generation
+- `ReportAgent` for building structured research report drafts from factor memory
+- unit tests for logging, config, protocol models, DataAgent, market data provider behavior, OHLCV cleaning, calendar alignment, DuckDB storage, market data cache behavior, HypothesisAgent behavior, factor templates, FeatureAgent behavior, factor generation, ranking transforms, rolling-window features, factor matrix persistence, BacktestAgent behavior, IC calculation, RankIC calculation, Sharpe calculation, Drawdown calculation, result JSON generation, benchmark tests, MemoryAgent behavior, FAISS memory retrieval, factor wiki generation, and ReportAgent behavior
 
 Not implemented yet:
 
-- report generation
+- markdown report file generation
 - Streamlit dashboard
 
 ## Project Structure
@@ -104,6 +105,7 @@ Not implemented yet:
     │   ├── memory_agent.py
     │   ├── memory_index.py
     │   ├── ohlcv_cleaner.py
+    │   ├── report_agent.py
     │   └── trading_calendar.py
     ├── core/
     │   ├── __init__.py
@@ -618,6 +620,32 @@ print(result.to_dict())
 
 Day 24 intentionally stops at saving the wiki. ReportAgent is scoped to Day 25.
 
+## ReportAgent Example
+
+`ReportAgent` builds a structured report draft from a factor memory record. It
+does not write a markdown report file yet; Day 26 owns markdown rendering and
+report persistence.
+
+```python
+from agents.report_agent import ReportAgent
+from core.models import AgentRequest
+
+request = AgentRequest.create(
+    {
+        "memory_path": "memory/factor_memory.jsonl",
+        "factor_name": "alpha_001",
+        "factor_wiki_path": "memory/factor_wiki.md",
+    }
+)
+
+response = ReportAgent().run(request)
+print(response.output["report_title"])
+print(response.output["report_draft"]["sections"])
+```
+
+The current draft is structured JSON with five sections: hypothesis, factor
+formula, backtest results, risk analysis, and conclusion.
+
 ## Configuration
 
 `AppConfig` reads optional environment variables:
@@ -665,8 +693,9 @@ Week 1:
 - Day 22: MemoryAgent JSONL records
 - Day 23: FAISS memory retrieval
 - Day 24: factor wiki markdown
+- Day 25: ReportAgent structured draft
 
-Next steps cover report generation and dashboard.
+Next steps cover markdown report generation and dashboard.
 
 ## Engineering Principles
 

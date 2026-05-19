@@ -1071,6 +1071,48 @@ next_action = Build ReportAgent in Day 25.
 Day 24 intentionally saves a wiki only. ReportAgent construction remains scoped
 to Day 25.
 
+## Day 25 --- ReportAgent
+
+Implemented in `quant-agent/`:
+
+-   `ReportAgent` in `quant-agent/agents/report_agent.py`
+-   `ReportSpec` request validation for either `payload.memory_record` or
+    `payload.memory_path`
+-   memory record selection by `payload.memory_id` or `payload.factor_name`
+    when reading JSONL memory
+-   optional `payload.factor_wiki_path` context loading
+-   `build_report_draft(...)` for producing a structured JSON research report
+    draft
+-   five-section report draft contract: Hypothesis, Factor Formula, Backtest
+    Results, Risk Analysis, and Conclusion
+-   structured logs for validation, context loading, and draft construction
+-   tests for inline and JSONL source validation, selector behavior, failed
+    benchmark conclusions, wiki context, and ReportAgent response integration
+
+Current ReportAgent payload:
+
+```json
+{
+  "memory_path": "memory/factor_memory.jsonl",
+  "factor_name": "alpha_001",
+  "factor_wiki_path": "memory/factor_wiki.md"
+}
+```
+
+Current ReportAgent output:
+
+```text
+state = report_draft_built
+report_draft
+report_title
+section_count
+report_format = structured_json
+next_action = Generate markdown reports in Day 26.
+```
+
+Day 25 intentionally returns structured report data only. Markdown rendering
+and report file persistence remain scoped to Day 26.
+
 ------------------------------------------------------------------------
 
 # Memory Schema
