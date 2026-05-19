@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.i18n import DEFAULT_OUTPUT_LANGUAGE, OutputLanguage, normalize_output_language
+
 
 @dataclass(frozen=True, slots=True)
 class AppConfig:
@@ -19,6 +21,7 @@ class AppConfig:
     factors_dir: Path
     memory_dir: Path
     log_level: str
+    output_language: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE
     log_file: Path | None = None
 
     @classmethod
@@ -55,6 +58,9 @@ class AppConfig:
             factors_dir=_path_from_env(env, "QUANT_AGENT_FACTORS_DIR", root / "factors", root),
             memory_dir=_path_from_env(env, "QUANT_AGENT_MEMORY_DIR", root / "memory", root),
             log_level=env.get("QUANT_AGENT_LOG_LEVEL", "INFO").upper(),
+            output_language=normalize_output_language(
+                env.get("QUANT_AGENT_OUTPUT_LANGUAGE"),
+            ),
             log_file=log_file,
         )
 

@@ -9,6 +9,7 @@ from time import perf_counter
 from typing import Any
 
 from core.config import AppConfig
+from core.i18n import OutputLanguage, normalize_output_language
 from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
 from agents.factor_wiki import (
@@ -39,6 +40,7 @@ class MemorySpec:
     vector_metadata_path: Path | None = None
     wiki_path: Path | None = None
     factor_metadata: dict[str, Any] | None = None
+    output_language: OutputLanguage | None = None
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> MemorySpec:
@@ -59,6 +61,7 @@ class MemorySpec:
             vector_metadata_path=_optional_path(payload, "vector_metadata_path"),
             wiki_path=_optional_path(payload, "wiki_path"),
             factor_metadata=_optional_mapping(payload, "factor_metadata"),
+            output_language=_optional_output_language(payload),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,6 +79,7 @@ class MemorySpec:
             ),
             "wiki_path": str(self.wiki_path) if self.wiki_path else None,
             "factor_metadata": dict(self.factor_metadata or {}),
+            "output_language": self.output_language,
         }
 
 
@@ -382,7 +386,10 @@ class MemoryAgent:
     ) -> FactorWikiBuildResult:
         wiki_path = spec.wiki_path or self.config.memory_dir / DEFAULT_FACTOR_WIKI_FILENAME
         records = memory_store.load_all()
-        return FactorWikiStore(wiki_path).save(records)
+        return FactorWikiStore(
+            wiki_path,
+            output_language=spec.output_language or self.config.output_language,
+        ).save(records)
 
     def _metadata(
         self,
@@ -569,6 +576,16 @@ def _optional_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any] | 
         msg = f"payload.{key} must be an object when provided."
         raise ValueError(msg)
     return dict(value)
+
+
+def _optional_output_language(payload: Mapping[str, Any]) -> OutputLanguage | None:
+    value = payload.get("output_language")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        msg = "payload.output_language must be a string when provided."
+        raise ValueError(msg)
+    return normalize_output_language(value)
 
 
 def _required_mapping(payload: Mapping[str, Any], key: str) -> Mapping[str, Any]:

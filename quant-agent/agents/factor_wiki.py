@@ -6,8 +6,49 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.i18n import (
+    DEFAULT_OUTPUT_LANGUAGE,
+    LocalizedText,
+    OutputLanguage,
+    normalize_output_language,
+    render_label,
+    render_paragraph,
+)
+
 DEFAULT_FACTOR_WIKI_FILENAME = "factor_wiki.md"
 FACTOR_WIKI_FORMAT = "markdown"
+
+WIKI_LABELS = {
+    "title": LocalizedText(en="Quant Factor Wiki", zh="量化因子知识库"),
+    "summary": LocalizedText(en="Summary", zh="摘要"),
+    "factors": LocalizedText(en="Factors", zh="因子"),
+    "factor": LocalizedText(en="Factor", zh="因子"),
+    "benchmark": LocalizedText(en="Benchmark", zh="基准"),
+    "ic": LocalizedText(en="IC", zh="IC"),
+    "rank_ic": LocalizedText(en="RankIC", zh="RankIC"),
+    "sharpe": LocalizedText(en="Sharpe", zh="夏普"),
+    "max_drawdown": LocalizedText(en="Max Drawdown", zh="最大回撤"),
+    "total_return": LocalizedText(en="Total Return", zh="总收益"),
+    "failure_reason": LocalizedText(en="Failure Reason", zh="失败原因"),
+    "passed_benchmarks": LocalizedText(en="Passed benchmarks", zh="通过基准"),
+    "failed_benchmarks": LocalizedText(en="Failed benchmarks", zh="未通过基准"),
+    "memory_id": LocalizedText(en="Memory ID", zh="记忆 ID"),
+    "source_task": LocalizedText(en="Source task", zh="来源任务"),
+    "formula": LocalizedText(en="Formula", zh="公式"),
+    "hypothesis": LocalizedText(en="Hypothesis", zh="假设"),
+    "direction": LocalizedText(en="Direction", zh="方向"),
+    "forward_return_days": LocalizedText(en="Forward return days", zh="前瞻收益天数"),
+    "universe": LocalizedText(en="Universe", zh="股票池"),
+    "turnover": LocalizedText(en="Turnover", zh="换手率"),
+    "benchmark_status": LocalizedText(en="Benchmark status", zh="基准状态"),
+    "failed_tests": LocalizedText(en="Failed tests", zh="失败测试"),
+    "market_condition": LocalizedText(en="Market condition", zh="市场条件"),
+    "related_factors": LocalizedText(en="Related factors", zh="相关因子"),
+    "paper_reference": LocalizedText(en="Paper reference", zh="文献/资料引用"),
+    "result_json": LocalizedText(en="Result JSON", zh="结果 JSON"),
+    "factor_matrix": LocalizedText(en="Factor matrix", zh="因子矩阵"),
+    "aligned_data": LocalizedText(en="Aligned data", zh="对齐行情数据"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +60,7 @@ class FactorWikiBuildResult:
     factor_count: int
     passed_count: int
     failed_count: int
+    output_language: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE
     wiki_format: str = FACTOR_WIKI_FORMAT
 
     def to_dict(self) -> dict[str, Any]:
@@ -28,6 +70,7 @@ class FactorWikiBuildResult:
             "factor_count": self.factor_count,
             "passed_count": self.passed_count,
             "failed_count": self.failed_count,
+            "output_language": self.output_language,
             "wiki_format": self.wiki_format,
         }
 
@@ -35,11 +78,20 @@ class FactorWikiBuildResult:
 class FactorWikiStore:
     """File-backed Markdown wiki for factor research memory records."""
 
-    def __init__(self, wiki_path: str | Path) -> None:
+    def __init__(
+        self,
+        wiki_path: str | Path,
+        *,
+        output_language: str | None = None,
+    ) -> None:
         self.wiki_path = Path(wiki_path)
+        self.output_language = normalize_output_language(output_language)
 
     def save(self, records: Sequence[Mapping[str, Any]]) -> FactorWikiBuildResult:
-        markdown = build_factor_wiki_markdown(records)
+        markdown = build_factor_wiki_markdown(
+            records,
+            output_language=self.output_language,
+        )
         self.wiki_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = Path(f"{self.wiki_path}.tmp")
         temp_path.write_text(markdown, encoding="utf-8")
@@ -52,37 +104,67 @@ class FactorWikiStore:
             factor_count=summary["factor_count"],
             passed_count=summary["passed_count"],
             failed_count=summary["failed_count"],
+            output_language=self.output_language,
         )
 
 
-def build_factor_wiki_markdown(records: Sequence[Mapping[str, Any]]) -> str:
+def build_factor_wiki_markdown(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    output_language: str | None = None,
+) -> str:
     """Render factor memory records into a deterministic Markdown wiki."""
 
+    language = normalize_output_language(output_language)
     sorted_records = sorted(records, key=_record_sort_key)
     summary = summarize_factor_wiki_records(sorted_records)
+    generated_sentence = render_paragraph(
+        en=f"Generated from {summary['record_count']} factor memory records.",
+        zh=f"由 {summary['record_count']} 条因子记忆记录生成。",
+        language=language,
+    )
     lines = [
-        "# Quant Factor Wiki",
+        f"# {_wiki_label('title', language)}",
         "",
-        f"Generated from {summary['record_count']} factor memory records.",
+        generated_sentence,
         "",
-        "## Summary",
+        f"## {_wiki_label('summary', language)}",
         "",
-        f"- Factors: {summary['factor_count']}",
-        f"- Passed benchmarks: {summary['passed_count']}",
-        f"- Failed benchmarks: {summary['failed_count']}",
+        f"- {_wiki_label('factors', language)}: {summary['factor_count']}",
+        f"- {_wiki_label('passed_benchmarks', language)}: {summary['passed_count']}",
+        f"- {_wiki_label('failed_benchmarks', language)}: {summary['failed_count']}",
         "",
-        "| Factor | Benchmark | IC | RankIC | Sharpe | Max Drawdown | Total Return | Failure Reason |",
+        "| "
+        + " | ".join(
+            [
+                _wiki_label("factor", language),
+                _wiki_label("benchmark", language),
+                _wiki_label("ic", language),
+                _wiki_label("rank_ic", language),
+                _wiki_label("sharpe", language),
+                _wiki_label("max_drawdown", language),
+                _wiki_label("total_return", language),
+                _wiki_label("failure_reason", language),
+            ]
+        )
+        + " |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
 
     for record in sorted_records:
         lines.append(_summary_row(record))
 
-    lines.extend(["", "## Factors", ""])
+    lines.extend(["", f"## {_wiki_label('factors', language)}", ""])
     if not sorted_records:
-        lines.append("No factor memory records saved yet.")
+        lines.append(
+            render_label(
+                "No factor memory records saved yet.",
+                "尚未保存因子记忆记录。",
+                language,
+            )
+        )
     for record in sorted_records:
-        lines.extend(_factor_section(record))
+        lines.extend(_factor_section(record, output_language=language))
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -125,7 +207,11 @@ def _summary_row(record: Mapping[str, Any]) -> str:
     )
 
 
-def _factor_section(record: Mapping[str, Any]) -> list[str]:
+def _factor_section(
+    record: Mapping[str, Any],
+    *,
+    output_language: OutputLanguage,
+) -> list[str]:
     factor = _required_mapping(record, "factor")
     performance = _required_mapping(record, "performance")
     benchmark = _required_mapping(record, "benchmark")
@@ -137,31 +223,56 @@ def _factor_section(record: Mapping[str, Any]) -> list[str]:
     lines = [
         f"### {factor_name}",
         "",
-        f"- Memory ID: `{_text(record.get('memory_id'))}`",
-        f"- Source task: `{_text(source.get('task_id'))}`",
-        f"- Formula: {_text_or_na(factor.get('formula'))}",
-        f"- Hypothesis: {_text_or_na(factor.get('hypothesis'))}",
-        f"- Direction: {_text_or_na(factor.get('direction'))}",
-        f"- Forward return days: {_text_or_na(factor.get('forward_return_days'))}",
-        f"- Universe: {_text_or_na(factor.get('universe'))}",
-        f"- IC: {_format_number(performance.get('ic'))}",
-        f"- RankIC: {_format_number(performance.get('rank_ic'))}",
-        f"- Sharpe: {_format_number(performance.get('sharpe'))}",
-        f"- Max drawdown: {_format_number(performance.get('max_drawdown'))}",
-        f"- Total return: {_format_number(performance.get('total_return'))}",
-        f"- Turnover: {_format_number(performance.get('turnover'))}",
-        f"- Benchmark status: {_text_or_na(benchmark.get('status'))}",
-        f"- Failed tests: {_format_sequence(benchmark.get('failed_tests'))}",
-        f"- Failure reason: {_text_or_na(diagnostics.get('failure_reason'))}",
-        f"- Market condition: {_text_or_na(diagnostics.get('market_condition'))}",
-        f"- Related factors: {_format_sequence(diagnostics.get('related_factors'))}",
-        f"- Paper reference: {_text_or_na(diagnostics.get('paper_reference'))}",
-        f"- Result JSON: {_text_or_na(artifacts.get('result_json_path'))}",
-        f"- Factor matrix: {_text_or_na(artifacts.get('factor_matrix_path'))}",
-        f"- Aligned data: {_text_or_na(artifacts.get('aligned_data_path'))}",
+        f"- {_wiki_label('memory_id', output_language)}: `{_text(record.get('memory_id'))}`",
+        f"- {_wiki_label('source_task', output_language)}: `{_text(source.get('task_id'))}`",
+        f"- {_wiki_label('formula', output_language)}: {_text_or_na(factor.get('formula'))}",
+        f"- {_wiki_label('hypothesis', output_language)}: "
+        f"{_text_or_na(factor.get('hypothesis'))}",
+        f"- {_wiki_label('direction', output_language)}: "
+        f"{_text_or_na(factor.get('direction'))}",
+        f"- {_wiki_label('forward_return_days', output_language)}: "
+        f"{_text_or_na(factor.get('forward_return_days'))}",
+        f"- {_wiki_label('universe', output_language)}: "
+        f"{_text_or_na(factor.get('universe'))}",
+        f"- {_wiki_label('ic', output_language)}: {_format_number(performance.get('ic'))}",
+        f"- {_wiki_label('rank_ic', output_language)}: "
+        f"{_format_number(performance.get('rank_ic'))}",
+        f"- {_wiki_label('sharpe', output_language)}: "
+        f"{_format_number(performance.get('sharpe'))}",
+        f"- {_wiki_label('max_drawdown', output_language)}: "
+        f"{_format_number(performance.get('max_drawdown'))}",
+        f"- {_wiki_label('total_return', output_language)}: "
+        f"{_format_number(performance.get('total_return'))}",
+        f"- {_wiki_label('turnover', output_language)}: "
+        f"{_format_number(performance.get('turnover'))}",
+        f"- {_wiki_label('benchmark_status', output_language)}: "
+        f"{_text_or_na(benchmark.get('status'))}",
+        f"- {_wiki_label('failed_tests', output_language)}: "
+        f"{_format_sequence(benchmark.get('failed_tests'))}",
+        f"- {_wiki_label('failure_reason', output_language)}: "
+        f"{_text_or_na(diagnostics.get('failure_reason'))}",
+        f"- {_wiki_label('market_condition', output_language)}: "
+        f"{_text_or_na(diagnostics.get('market_condition'))}",
+        f"- {_wiki_label('related_factors', output_language)}: "
+        f"{_format_sequence(diagnostics.get('related_factors'))}",
+        f"- {_wiki_label('paper_reference', output_language)}: "
+        f"{_text_or_na(diagnostics.get('paper_reference'))}",
+        f"- {_wiki_label('result_json', output_language)}: "
+        f"{_text_or_na(artifacts.get('result_json_path'))}",
+        f"- {_wiki_label('factor_matrix', output_language)}: "
+        f"{_text_or_na(artifacts.get('factor_matrix_path'))}",
+        f"- {_wiki_label('aligned_data', output_language)}: "
+        f"{_text_or_na(artifacts.get('aligned_data_path'))}",
         "",
     ]
     return lines
+
+
+def _wiki_label(key: str, output_language: OutputLanguage) -> str:
+    label = WIKI_LABELS.get(key)
+    if label is None:
+        return key.replace("_", " ").strip().capitalize()
+    return label.render(output_language)
 
 
 def _record_sort_key(record: Mapping[str, Any]) -> tuple[str, str, str]:

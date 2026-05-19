@@ -9,6 +9,13 @@ from time import perf_counter
 from typing import Any
 
 from core.config import AppConfig
+from core.i18n import (
+    DEFAULT_OUTPUT_LANGUAGE,
+    LocalizedText,
+    OutputLanguage,
+    normalize_output_language,
+    render_label,
+)
 from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
 from agents.memory_agent import FactorMemoryStore
@@ -24,6 +31,56 @@ REPORT_SECTION_ORDER = (
     ("risk_analysis", "Risk Analysis"),
     ("conclusion", "Conclusion"),
 )
+REPORT_SECTION_TITLES = {
+    "hypothesis": LocalizedText(en="Hypothesis", zh="研究假设"),
+    "factor_formula": LocalizedText(en="Factor Formula", zh="因子公式"),
+    "backtest_results": LocalizedText(en="Backtest Results", zh="回测结果"),
+    "risk_analysis": LocalizedText(en="Risk Analysis", zh="风险分析"),
+    "conclusion": LocalizedText(en="Conclusion", zh="结论"),
+}
+REPORT_LABELS = {
+    "metadata": LocalizedText(en="Metadata", zh="元数据"),
+    "memory_id": LocalizedText(en="Memory ID", zh="记忆 ID"),
+    "source_task": LocalizedText(en="Source task", zh="来源任务"),
+    "source_agent": LocalizedText(en="Source agent", zh="来源 Agent"),
+    "generated_at": LocalizedText(en="Generated at", zh="生成时间"),
+    "factor": LocalizedText(en="Factor", zh="因子"),
+    "name": LocalizedText(en="Name", zh="名称"),
+    "formula": LocalizedText(en="Formula", zh="公式"),
+    "hypothesis": LocalizedText(en="Hypothesis", zh="假设"),
+    "direction": LocalizedText(en="Direction", zh="方向"),
+    "universe": LocalizedText(en="Universe", zh="股票池"),
+    "forward_return_days": LocalizedText(en="Forward return days", zh="前瞻收益天数"),
+    "related_factors": LocalizedText(en="Related factors", zh="相关因子"),
+    "paper_reference": LocalizedText(en="Paper reference", zh="文献/资料引用"),
+    "ic": LocalizedText(en="IC", zh="IC"),
+    "rank_ic": LocalizedText(en="RankIC", zh="RankIC"),
+    "sharpe": LocalizedText(en="Sharpe", zh="夏普"),
+    "max_drawdown": LocalizedText(en="Max drawdown", zh="最大回撤"),
+    "max_drawdown_abs": LocalizedText(en="Max drawdown abs", zh="最大回撤绝对值"),
+    "total_return": LocalizedText(en="Total return", zh="总收益"),
+    "turnover": LocalizedText(en="Turnover", zh="换手率"),
+    "benchmark_status": LocalizedText(en="Benchmark status", zh="基准状态"),
+    "passed_count": LocalizedText(en="Passed count", zh="通过数量"),
+    "failed_count": LocalizedText(en="Failed count", zh="失败数量"),
+    "failed_tests": LocalizedText(en="Failed tests", zh="失败测试"),
+    "failure_reason": LocalizedText(en="Failure reason", zh="失败原因"),
+    "market_condition": LocalizedText(en="Market condition", zh="市场条件"),
+    "result_json_path": LocalizedText(en="Result JSON path", zh="结果 JSON 路径"),
+    "factor_matrix_path": LocalizedText(en="Factor matrix path", zh="因子矩阵路径"),
+    "verdict": LocalizedText(en="Verdict", zh="结论判断"),
+    "key_metric": LocalizedText(en="Key metric", zh="关键指标"),
+}
+REPORT_VALUE_LABELS = {
+    "candidate_for_follow_up": LocalizedText(
+        en="candidate_for_follow_up",
+        zh="可继续跟踪候选",
+    ),
+    "needs_review": LocalizedText(en="needs_review", zh="需要复核"),
+    "passed": LocalizedText(en="passed", zh="通过"),
+    "failed": LocalizedText(en="failed", zh="未通过"),
+    "unknown": LocalizedText(en="unknown", zh="未知"),
+}
 _SAFE_REPORT_STEM_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -38,6 +95,7 @@ class ReportSpec:
     factor_wiki_path: Path | None = None
     report_path: Path | None = None
     report_title: str | None = None
+    output_language: OutputLanguage | None = None
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> ReportSpec:
@@ -61,6 +119,7 @@ class ReportSpec:
             ),
             report_path=_optional_path(payload, "report_path"),
             report_title=_optional_str(payload, "report_title"),
+            output_language=_optional_output_language(payload),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -74,6 +133,7 @@ class ReportSpec:
             ),
             "report_path": str(self.report_path) if self.report_path else None,
             "report_title": self.report_title,
+            "output_language": self.output_language,
         }
 
 
@@ -159,6 +219,7 @@ class ReportAgent:
             "Loaded report context.",
             extra={"action": "load_report_context", "status": "success"},
         )
+        output_language = spec.output_language or self.config.output_language
 
         self.logger.info(
             "Building structured report draft.",
@@ -170,6 +231,7 @@ class ReportAgent:
                 report_title=spec.report_title,
                 factor_wiki_path=spec.factor_wiki_path,
                 factor_wiki_text=factor_wiki_text,
+                output_language=output_language,
             )
         except (TypeError, ValueError) as exc:
             elapsed = perf_counter() - started_at
@@ -226,6 +288,7 @@ class ReportAgent:
                 "request": spec.to_dict(),
                 "report_draft": report_draft.document,
                 "report_title": report_draft.title,
+                "output_language": output_language,
                 "section_count": len(report_draft.document["sections"]),
                 "report_draft_format": REPORT_DRAFT_FORMAT,
                 "report_format": REPORT_FORMAT,
@@ -336,9 +399,11 @@ def build_report_draft(
     report_title: str | None = None,
     factor_wiki_path: Path | None = None,
     factor_wiki_text: str | None = None,
+    output_language: str | None = None,
 ) -> ReportDraft:
     """Build a structured report draft without rendering Markdown."""
 
+    language = _normalize_report_language(output_language)
     factor = _required_mapping(memory_record, "factor")
     performance = _required_mapping(memory_record, "performance")
     benchmark = _required_mapping(memory_record, "benchmark")
@@ -351,7 +416,8 @@ def build_report_draft(
     document = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "report_format": REPORT_DRAFT_FORMAT,
-        "title": report_title or f"Research Report: {factor_name}",
+        "output_language": language,
+        "title": report_title or _default_report_title(factor_name, language),
         "source": {
             "memory_id": memory_id,
             "source_task_id": source.get("task_id"),
@@ -373,11 +439,17 @@ def build_report_draft(
             ),
         },
         "sections": [
-            _hypothesis_section(factor),
-            _factor_formula_section(factor, diagnostics),
-            _backtest_results_section(performance, benchmark),
-            _risk_analysis_section(performance, benchmark, diagnostics, artifacts),
-            _conclusion_section(performance, benchmark, diagnostics),
+            _hypothesis_section(factor, output_language=language),
+            _factor_formula_section(factor, diagnostics, output_language=language),
+            _backtest_results_section(performance, benchmark, output_language=language),
+            _risk_analysis_section(
+                performance,
+                benchmark,
+                diagnostics,
+                artifacts,
+                output_language=language,
+            ),
+            _conclusion_section(performance, benchmark, diagnostics, output_language=language),
         ],
         "next_action": "Build Streamlit dashboard in Day 27.",
     }
@@ -389,25 +461,33 @@ def render_report_markdown(report_draft: Mapping[str, Any]) -> str:
     """Render a structured report draft to Markdown."""
 
     title = _required_str(report_draft, "title")
+    output_language = _normalize_report_language(report_draft.get("output_language"))
     source = _required_mapping(report_draft, "source")
     factor = _required_mapping(report_draft, "factor")
     sections = _required_sequence(report_draft, "sections")
     lines = [
         f"# {title}",
         "",
-        "## Metadata",
+        f"## {_report_label('metadata', output_language)}",
         "",
-        f"- Memory ID: `{_string_or_na(source.get('memory_id'))}`",
-        f"- Source task: `{_string_or_na(source.get('source_task_id'))}`",
-        f"- Source agent: {_string_or_na(source.get('source_agent'))}",
-        f"- Generated at: {_string_or_na(source.get('generated_at'))}",
+        f"- {_report_label('memory_id', output_language)}: "
+        f"`{_string_or_na(source.get('memory_id'))}`",
+        f"- {_report_label('source_task', output_language)}: "
+        f"`{_string_or_na(source.get('source_task_id'))}`",
+        f"- {_report_label('source_agent', output_language)}: "
+        f"{_string_or_na(source.get('source_agent'))}",
+        f"- {_report_label('generated_at', output_language)}: "
+        f"{_string_or_na(source.get('generated_at'))}",
         "",
-        "## Factor",
+        f"## {_report_label('factor', output_language)}",
         "",
-        f"- Name: {_string_or_na(factor.get('name'))}",
-        f"- Formula: {_string_or_na(factor.get('formula'))}",
-        f"- Direction: {_string_or_na(factor.get('direction'))}",
-        f"- Universe: {_string_or_na(factor.get('universe'))}",
+        f"- {_report_label('name', output_language)}: {_string_or_na(factor.get('name'))}",
+        f"- {_report_label('formula', output_language)}: "
+        f"{_string_or_na(factor.get('formula'))}",
+        f"- {_report_label('direction', output_language)}: "
+        f"{_format_markdown_value(factor.get('direction'), output_language)}",
+        f"- {_report_label('universe', output_language)}: "
+        f"{_string_or_na(factor.get('universe'))}",
         "",
     ]
 
@@ -415,7 +495,7 @@ def render_report_markdown(report_draft: Mapping[str, Any]) -> str:
         if not isinstance(section, Mapping):
             msg = "report_draft.sections must contain objects."
             raise ValueError(msg)
-        lines.extend(_render_section(section))
+        lines.extend(_render_section(section, output_language=output_language))
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -436,7 +516,11 @@ def save_markdown_report(markdown_report: str, report_path: Path) -> MarkdownRep
     )
 
 
-def _hypothesis_section(factor: Mapping[str, Any]) -> dict[str, Any]:
+def _hypothesis_section(
+    factor: Mapping[str, Any],
+    *,
+    output_language: OutputLanguage,
+) -> dict[str, Any]:
     return _section(
         "hypothesis",
         {
@@ -445,12 +529,15 @@ def _hypothesis_section(factor: Mapping[str, Any]) -> dict[str, Any]:
             "universe": factor.get("universe"),
             "forward_return_days": factor.get("forward_return_days"),
         },
+        output_language=output_language,
     )
 
 
 def _factor_formula_section(
     factor: Mapping[str, Any],
     diagnostics: Mapping[str, Any],
+    *,
+    output_language: OutputLanguage,
 ) -> dict[str, Any]:
     return _section(
         "factor_formula",
@@ -459,12 +546,15 @@ def _factor_formula_section(
             "related_factors": list(_string_sequence(diagnostics.get("related_factors"))),
             "paper_reference": diagnostics.get("paper_reference"),
         },
+        output_language=output_language,
     )
 
 
 def _backtest_results_section(
     performance: Mapping[str, Any],
     benchmark: Mapping[str, Any],
+    *,
+    output_language: OutputLanguage,
 ) -> dict[str, Any]:
     return _section(
         "backtest_results",
@@ -480,6 +570,7 @@ def _backtest_results_section(
             "passed_count": benchmark.get("passed_count"),
             "failed_count": benchmark.get("failed_count"),
         },
+        output_language=output_language,
     )
 
 
@@ -488,6 +579,8 @@ def _risk_analysis_section(
     benchmark: Mapping[str, Any],
     diagnostics: Mapping[str, Any],
     artifacts: Mapping[str, Any],
+    *,
+    output_language: OutputLanguage,
 ) -> dict[str, Any]:
     return _section(
         "risk_analysis",
@@ -499,6 +592,7 @@ def _risk_analysis_section(
             "result_json_path": artifacts.get("result_json_path"),
             "factor_matrix_path": artifacts.get("factor_matrix_path"),
         },
+        output_language=output_language,
     )
 
 
@@ -506,6 +600,8 @@ def _conclusion_section(
     performance: Mapping[str, Any],
     benchmark: Mapping[str, Any],
     diagnostics: Mapping[str, Any],
+    *,
+    output_language: OutputLanguage,
 ) -> dict[str, Any]:
     benchmark_status = str(benchmark.get("status") or "unknown")
     verdict = "candidate_for_follow_up" if benchmark_status == "passed" else "needs_review"
@@ -520,14 +616,19 @@ def _conclusion_section(
             },
             "failure_reason": diagnostics.get("failure_reason"),
         },
+        output_language=output_language,
     )
 
 
-def _section(section_id: str, content: Mapping[str, Any]) -> dict[str, Any]:
-    titles = dict(REPORT_SECTION_ORDER)
+def _section(
+    section_id: str,
+    content: Mapping[str, Any],
+    *,
+    output_language: OutputLanguage,
+) -> dict[str, Any]:
     return {
         "id": section_id,
-        "title": titles[section_id],
+        "title": _section_title(section_id, output_language),
         "content": dict(content),
     }
 
@@ -609,6 +710,16 @@ def _optional_str(payload: Mapping[str, Any], key: str) -> str | None:
     return value.strip()
 
 
+def _optional_output_language(payload: Mapping[str, Any]) -> OutputLanguage | None:
+    value = payload.get("output_language")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        msg = "payload.output_language must be a string when provided."
+        raise ValueError(msg)
+    return normalize_output_language(value)
+
+
 def _string_sequence(value: Any) -> list[str]:
     if value is None:
         return []
@@ -619,26 +730,38 @@ def _string_sequence(value: Any) -> list[str]:
     return [str(value).strip()]
 
 
-def _render_section(section: Mapping[str, Any]) -> list[str]:
+def _render_section(
+    section: Mapping[str, Any],
+    *,
+    output_language: OutputLanguage,
+) -> list[str]:
     title = _required_str(section, "title")
     content = _required_mapping(section, "content")
     lines = [f"## {title}", ""]
     for key, value in content.items():
-        lines.append(f"- {_humanize_key(str(key))}: {_format_markdown_value(value)}")
+        lines.append(
+            f"- {_report_label(str(key), output_language)}: "
+            f"{_format_markdown_value(value, output_language)}"
+        )
     lines.append("")
     return lines
 
 
-def _format_markdown_value(value: Any) -> str:
+def _format_markdown_value(value: Any, output_language: OutputLanguage) -> str:
     if isinstance(value, Mapping):
         rendered_items = [
-            f"{_humanize_key(str(key))}={_string_or_na(item)}"
+            f"{_report_label(str(key), output_language)}="
+            f"{_format_markdown_value(item, output_language)}"
             for key, item in value.items()
         ]
         return ", ".join(rendered_items) if rendered_items else "N/A"
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        rendered_values = [_string_or_na(item) for item in value]
+        rendered_values = [_format_markdown_value(item, output_language) for item in value]
         return ", ".join(rendered_values) if rendered_values else "N/A"
+    if isinstance(value, str):
+        localized = REPORT_VALUE_LABELS.get(value.strip().lower())
+        if localized is not None:
+            return localized.render(output_language)
     return _string_or_na(value)
 
 
@@ -649,6 +772,35 @@ def _string_or_na(value: Any) -> str:
         stripped = value.strip()
         return stripped if stripped else "N/A"
     return str(value)
+
+
+def _default_report_title(factor_name: str, output_language: OutputLanguage) -> str:
+    return render_label(
+        f"Research Report: {factor_name}",
+        f"研究报告：{factor_name}",
+        output_language,
+    )
+
+
+def _section_title(section_id: str, output_language: OutputLanguage) -> str:
+    title = REPORT_SECTION_TITLES.get(section_id)
+    if title is None:
+        return _humanize_key(section_id)
+    return title.render(output_language)
+
+
+def _report_label(key: str, output_language: OutputLanguage) -> str:
+    label = REPORT_LABELS.get(key)
+    if label is not None:
+        return label.render(output_language)
+    return _humanize_key(key)
+
+
+def _normalize_report_language(value: Any) -> OutputLanguage:
+    return normalize_output_language(
+        value if isinstance(value, str) else None,
+        default=DEFAULT_OUTPUT_LANGUAGE,
+    )
 
 
 def _humanize_key(key: str) -> str:

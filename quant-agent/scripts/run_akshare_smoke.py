@@ -19,6 +19,7 @@ from agents.akshare_smoke import (  # noqa: E402
     run_akshare_smoke,
 )
 from core.config import AppConfig  # noqa: E402
+from core.i18n import SUPPORTED_OUTPUT_LANGUAGES, normalize_output_language  # noqa: E402
 from core.logging import configure_logging  # noqa: E402
 
 
@@ -42,6 +43,10 @@ def main(argv: list[str] | None = None) -> int:
         symbol_sleep_sec=args.symbol_sleep_sec,
         timeout_sec=args.timeout_sec,
         task_id=args.task_id,
+        output_language=normalize_output_language(
+            args.output_language,
+            default=config.output_language,
+        ),
     )
     report = run_akshare_smoke(config, spec)
     document = json.dumps(
@@ -100,6 +105,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--symbol-sleep-sec", type=float, default=0.0)
     parser.add_argument("--timeout-sec", type=float, default=15.0)
     parser.add_argument("--task-id", default="akshare-smoke")
+    parser.add_argument(
+        "--output-language",
+        choices=SUPPORTED_OUTPUT_LANGUAGES,
+        default=None,
+        help="Human-facing output language. Defaults to config/env output_language.",
+    )
     return parser
 
 

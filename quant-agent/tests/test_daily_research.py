@@ -38,6 +38,7 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
                     "output_dir": "runs",
                     "template_ids": ["close_to_open_return"],
                     "factor_set_name": "daily_test",
+                    "output_language": "zh",
                 }
             }
         ),
@@ -51,6 +52,7 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
     assert spec.symbols == ("000001", "000002")
     assert spec.output_dir == Path("runs")
     assert spec.template_ids == ("close_to_open_return",)
+    assert spec.output_language == "zh"
 
 
 def test_run_daily_research_writes_manifest_and_artifacts(tmp_path: Path) -> None:
@@ -97,12 +99,13 @@ def test_run_daily_research_writes_manifest_and_artifacts(tmp_path: Path) -> Non
     assert result.status == "success"
     assert result.exit_code == 0
     assert result.manifest_path.is_file()
-    assert "benchmark_status: passed" in format_daily_research_summary(result)
+    assert "基准状态 / benchmark_status: passed" in format_daily_research_summary(result)
 
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == 1
     assert manifest["status"] == "success"
     assert manifest["run_id"] == "daily-e2e"
+    assert manifest["output_language"] == "bilingual"
     assert set(manifest["stages"]) == {"data", "feature", "backtest", "memory", "report"}
     assert manifest["summary"]["factor_column"] == "factor__close_to_open_return"
     assert manifest["summary"]["benchmark_status"] == "passed"

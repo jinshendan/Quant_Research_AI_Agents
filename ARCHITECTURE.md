@@ -1330,6 +1330,29 @@ The script intentionally consumes the existing agent interfaces instead of
 adding a separate orchestration framework. Ranking output remains the next P0
 task in `TODO.md`.
 
+## Project Output Language
+
+Implemented in `quant-agent/`:
+
+-   `core/i18n.py` defines the shared `OutputLanguage` contract:
+    `en`, `zh`, and `bilingual`
+-   `AppConfig.output_language` reads `QUANT_AGENT_OUTPUT_LANGUAGE` and defaults
+    to `bilingual`
+-   human-facing output supports bilingual rendering in:
+    -   `ReportAgent` Markdown reports
+    -   `FactorWikiStore` Markdown wiki pages
+    -   `format_daily_research_summary(...)` terminal output
+    -   `AkShareSmokeReport.suggested_actions` and diagnostic messages
+    -   Streamlit dashboard labels
+-   `scripts/run_daily_research.py` and `scripts/run_akshare_smoke.py` expose
+    `--output-language`
+-   daily research configs accept `output_language`
+
+Structured JSON keys remain English by design. Those keys are the stable agent
+interface and should not be localized. Localized text is limited to fields that
+humans read directly, such as Markdown headings, labels, diagnostics, and
+terminal summaries.
+
 ------------------------------------------------------------------------
 
 # Memory Schema

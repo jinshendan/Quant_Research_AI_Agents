@@ -24,7 +24,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 - 作为个人实盘前研究辅助工具
 
 当前项目不适合直接作为自动交易系统，也不能单独作为真实资金买卖决策依据。
-它仍缺少完整的日常研究 pipeline、A 股交易约束、交易成本、组合管理和实盘风控。
+它仍缺少每日候选股排名、A 股交易约束、交易成本、组合管理和实盘风控。
 
 ### 已实现功能
 
@@ -48,6 +48,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | FAISS 语义检索 | 已实现 | 对因子记忆做本地向量索引和搜索 |
 | Factor wiki | 已实现 | 自动生成因子知识库 Markdown |
 | ReportAgent | 已实现 | 生成结构化研究报告和 Markdown 报告 |
+| 中英双语输出 | 已实现 | 报告、Factor Wiki、daily 摘要、AkShare smoke、dashboard 支持 `en` / `zh` / `bilingual` |
 | Streamlit dashboard | 已实现 | 因子排名、指标分布、报告列表 |
 | Factor Explorer | 已实现 | 查看单个因子记录、诊断和关联报告 |
 | Semantic Search UI | 已实现 | dashboard 中搜索历史因子记忆 |
@@ -64,6 +65,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | 保存因子研究记录和 FAISS 索引 |
 | ReportAgent | `quant-agent/agents/report_agent.py` | 生成 Markdown 研究报告 |
+| I18N | `quant-agent/core/i18n.py` | 统一管理中英双语输出标签 |
 | Daily Research | `quant-agent/scripts/run_daily_research.py` | 串联每日研究 pipeline 并输出运行清单 |
 | Dashboard | `quant-agent/dashboard.py` | 交互式查看因子、报告和语义搜索 |
 | AkShare Smoke | `quant-agent/scripts/run_akshare_smoke.py` | 真实 AkShare 连接与数据质量诊断 |
@@ -113,6 +115,21 @@ source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 ```
 
+配置输出语言：
+
+```bash
+export QUANT_AGENT_OUTPUT_LANGUAGE=bilingual
+```
+
+可选值：
+
+- `bilingual`: 中英双语，默认值
+- `zh`: 中文
+- `en`: 英文
+
+结构化 JSON 字段名仍保持英文，避免破坏 agent 之间的接口；人类可读的报告、
+Factor Wiki、终端摘要、AkShare smoke 建议和 dashboard 标签会根据语言配置输出。
+
 运行基础 smoke test：
 
 ```bash
@@ -127,6 +144,7 @@ python scripts/run_akshare_smoke.py \
   --start-date 2024-01-02 \
   --end-date 2024-01-03 \
   --symbol-sleep-sec 0.2 \
+  --output-language bilingual \
   --output /tmp/akshare-smoke.json
 ```
 
@@ -157,6 +175,7 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
   "factor_set_name": "daily_demo",
   "factor_direction": "positive",
   "quantile_count": 5,
+  "output_language": "bilingual",
   "factor_metadata": {
     "name": "daily_close_to_open",
     "formula": "close / open - 1",
@@ -281,6 +300,7 @@ memory_response = MemoryAgent().run(
                 "formula": "return_5d",
                 "hypothesis": "Short-term momentum may persist.",
             },
+            "output_language": "bilingual",
         }
     )
 )
@@ -290,6 +310,7 @@ report_response = ReportAgent().run(
         {
             "memory_path": memory_response.output["memory_path"],
             "factor_name": "custom_return_5d",
+            "output_language": "bilingual",
         }
     )
 )
@@ -382,6 +403,7 @@ for real-money trading decisions.
 | FAISS search | Done | Local semantic search over factor memory |
 | Factor wiki | Done | Markdown factor knowledge base |
 | ReportAgent | Done | Structured draft and Markdown report generation |
+| Bilingual output | Done | Reports, Factor Wiki, daily summaries, AkShare smoke, and dashboard support `en` / `zh` / `bilingual` |
 | Streamlit dashboard | Done | Factor ranking, metric distributions, report inventory |
 | Factor Explorer | Done | Single-factor diagnostics and linked reports |
 | Semantic Search UI | Done | Search historical factor memory from the dashboard |
@@ -398,6 +420,7 @@ for real-money trading decisions.
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | Store factor research records and FAISS indexes |
 | ReportAgent | `quant-agent/agents/report_agent.py` | Generate Markdown research reports |
+| I18N | `quant-agent/core/i18n.py` | Shared bilingual output labels |
 | Daily Research | `quant-agent/scripts/run_daily_research.py` | Run the daily pipeline and write a run manifest |
 | Dashboard | `quant-agent/dashboard.py` | Inspect factors, reports, and semantic search results |
 | AkShare Smoke | `quant-agent/scripts/run_akshare_smoke.py` | Diagnose real AkShare connectivity and data quality |
@@ -422,6 +445,17 @@ source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 ```
 
+Configure human-facing output language:
+
+```bash
+export QUANT_AGENT_OUTPUT_LANGUAGE=bilingual
+```
+
+Allowed values are `bilingual`, `zh`, and `en`. `bilingual` is the default.
+Structured JSON keys stay in English for stable agent interfaces; human-facing
+reports, Factor Wiki pages, terminal summaries, AkShare smoke suggestions, and
+dashboard labels follow the language setting.
+
 Run the basic app smoke test:
 
 ```bash
@@ -436,6 +470,7 @@ python scripts/run_akshare_smoke.py \
   --start-date 2024-01-02 \
   --end-date 2024-01-03 \
   --symbol-sleep-sec 0.2 \
+  --output-language bilingual \
   --output /tmp/akshare-smoke.json
 ```
 
@@ -465,6 +500,7 @@ Minimal JSON config:
   "factor_set_name": "daily_demo",
   "factor_direction": "positive",
   "quantile_count": 5,
+  "output_language": "bilingual",
   "factor_metadata": {
     "name": "daily_close_to_open",
     "formula": "close / open - 1",

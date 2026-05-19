@@ -18,6 +18,12 @@ from agents.memory_agent import MemoryAgent
 from agents.report_agent import ReportAgent
 from agents.trading_calendar import TradingCalendarProvider
 from core.config import AppConfig
+from core.i18n import (
+    DEFAULT_OUTPUT_LANGUAGE,
+    LocalizedText,
+    OutputLanguage,
+    normalize_output_language,
+)
 from core.models import AgentRequest, AgentResponse
 
 DAILY_RESEARCH_MANIFEST_SCHEMA_VERSION = 1
@@ -29,6 +35,18 @@ DEFAULT_DAILY_QUANTILE_COUNT = 5
 DEFAULT_DAILY_ANNUALIZATION_FACTOR = 252
 DEFAULT_DAILY_PREVIEW_ROWS = 5
 _SAFE_RUN_ID_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
+SUMMARY_LABELS = {
+    "status": LocalizedText(en="status", zh="状态"),
+    "run_id": LocalizedText(en="run_id", zh="运行 ID"),
+    "manifest": LocalizedText(en="manifest", zh="清单文件"),
+    "error": LocalizedText(en="error", zh="错误"),
+    "symbols": LocalizedText(en="symbols", zh="股票代码"),
+    "failed_symbols": LocalizedText(en="failed_symbols", zh="失败股票代码"),
+    "factor_column": LocalizedText(en="factor_column", zh="因子列"),
+    "benchmark_status": LocalizedText(en="benchmark_status", zh="基准状态"),
+    "memory_id": LocalizedText(en="memory_id", zh="记忆 ID"),
+    "report_path": LocalizedText(en="report_path", zh="报告路径"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,8 +82,14 @@ class DailyResearchSpec:
     )
     factor_metadata: dict[str, Any] = field(default_factory=dict)
     preview_rows: int = DEFAULT_DAILY_PREVIEW_ROWS
+    output_language: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "output_language",
+            normalize_output_language(self.output_language),
+        )
         if self.end_date < self.start_date:
             msg = "config.end_date must be greater than or equal to config.start_date."
             raise ValueError(msg)
@@ -151,6 +175,7 @@ class DailyResearchSpec:
                 minimum=0,
                 maximum=50,
             ),
+            output_language=_optional_output_language(raw),
         )
 
     @property
@@ -195,6 +220,7 @@ class DailyResearchSpec:
             "benchmark_thresholds": dict(self.benchmark_thresholds),
             "factor_metadata": dict(self.factor_metadata),
             "preview_rows": self.preview_rows,
+            "output_language": self.output_language,
         }
 
 
@@ -319,6 +345,7 @@ def run_daily_research(
                 {
                     "result_json_path": str(result_json_path),
                     "factor_metadata": factor_metadata,
+                    "output_language": spec.output_language,
                 },
                 task_id=f"{run_id}-memory",
             )
@@ -341,6 +368,7 @@ def run_daily_research(
                     "factor_name": str(factor_metadata["name"]),
                     "factor_wiki_path": str(wiki_path),
                     "report_path": str(report_path),
+                    "output_language": spec.output_language,
                 },
                 task_id=f"{run_id}-report",
             )
@@ -350,7 +378,7 @@ def run_daily_research(
         artifacts.update(stages["report"]["artifacts"])
 
         elapsed = perf_counter() - started_clock
-        summary = _summary(stages)
+        summary = _summary(stages, output_language=spec.output_language)
         manifest = _manifest(
             status="success",
             started_at=started_at,
@@ -373,7 +401,7 @@ def run_daily_research(
     except Exception as exc:  # noqa: BLE001 - pipeline boundary.
         elapsed = perf_counter() - started_clock
         error = str(exc)
-        summary = _summary(stages)
+        summary = _summary(stages, output_language=spec.output_language)
         manifest = _manifest(
             status="error",
             started_at=started_at,
@@ -396,15 +424,22 @@ def run_daily_research(
         )
 
 
-def format_daily_research_summary(result: DailyResearchRunResult) -> str:
+def format_daily_research_summary(
+    result: DailyResearchRunResult,
+    *,
+    output_language: str | None = None,
+) -> str:
     summary = dict(result.summary)
+    language = normalize_output_language(
+        output_language if output_language is not None else _summary_language(summary),
+    )
     lines = [
-        f"status: {result.status}",
-        f"run_id: {result.run_id}",
-        f"manifest: {result.manifest_path}",
+        f"{_summary_label('status', language)}: {result.status}",
+        f"{_summary_label('run_id', language)}: {result.run_id}",
+        f"{_summary_label('manifest', language)}: {result.manifest_path}",
     ]
     if result.error:
-        lines.append(f"error: {result.error}")
+        lines.append(f"{_summary_label('error', language)}: {result.error}")
     for key in (
         "symbols",
         "failed_symbols",
@@ -415,7 +450,7 @@ def format_daily_research_summary(result: DailyResearchRunResult) -> str:
     ):
         value = summary.get(key)
         if value not in (None, "", []):
-            lines.append(f"{key}: {value}")
+            lines.append(f"{_summary_label(key, language)}: {value}")
     return "\n".join(lines)
 
 
@@ -617,7 +652,11 @@ def _report_stage(response: AgentResponse) -> dict[str, Any]:
     }
 
 
-def _summary(stages: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+def _summary(
+    stages: Mapping[str, Mapping[str, Any]],
+    *,
+    output_language: OutputLanguage,
+) -> dict[str, Any]:
     data = _stage_summary(stages, "data")
     feature = _stage_summary(stages, "feature")
     backtest = _stage_summary(stages, "backtest")
@@ -631,6 +670,7 @@ def _summary(stages: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
         "benchmark_status": backtest.get("benchmark_status"),
         "memory_id": memory.get("memory_id"),
         "report_path": report_artifacts.get("report_path"),
+        "output_language": output_language,
     }
 
 
@@ -654,6 +694,7 @@ def _manifest(
         "started_at": started_at,
         "elapsed_sec": round(elapsed, 6),
         "run_dir": str(run_dir),
+        "output_language": spec.output_language,
         "request": spec.to_dict(),
         "stages": dict(stages),
         "artifacts": dict(artifacts),
@@ -740,6 +781,18 @@ def _payload_section(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     return payload
 
 
+def _summary_language(summary: Mapping[str, Any]) -> str | None:
+    value = summary.get("output_language")
+    return value if isinstance(value, str) else None
+
+
+def _summary_label(key: str, output_language: OutputLanguage) -> str:
+    label = SUMMARY_LABELS.get(key)
+    if label is None:
+        return key
+    return label.render(output_language)
+
+
 def _required_str(payload: Mapping[str, Any], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -765,6 +818,16 @@ def _optional_nullable_str(payload: Mapping[str, Any], key: str) -> str | None:
         raise ValueError(msg)
     stripped = value.strip()
     return stripped or None
+
+
+def _optional_output_language(payload: Mapping[str, Any]) -> OutputLanguage:
+    value = payload.get("output_language")
+    if value is None:
+        return DEFAULT_OUTPUT_LANGUAGE
+    if not isinstance(value, str):
+        msg = "config.output_language must be a string."
+        raise ValueError(msg)
+    return normalize_output_language(value)
 
 
 def _optional_bool(payload: Mapping[str, Any], key: str, default: bool) -> bool:

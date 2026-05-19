@@ -66,7 +66,7 @@ def test_build_factor_wiki_markdown_summarizes_and_lists_records() -> None:
         _memory_record("memory-1", name="alpha_momentum"),
     ]
 
-    markdown = build_factor_wiki_markdown(records)
+    markdown = build_factor_wiki_markdown(records, output_language="en")
 
     assert markdown.startswith("# Quant Factor Wiki")
     assert "- Factors: 2" in markdown
@@ -80,6 +80,17 @@ def test_build_factor_wiki_markdown_summarizes_and_lists_records() -> None:
     assert markdown.index("### alpha_momentum") < markdown.index("### alpha_reversal")
     assert "- Formula: rank(return_5d)" in markdown
     assert "- Related factors: momentum, return_5d" in markdown
+
+
+def test_build_factor_wiki_markdown_supports_bilingual_output() -> None:
+    markdown = build_factor_wiki_markdown(
+        [_memory_record("memory-1", name="alpha_momentum")],
+        output_language="bilingual",
+    )
+
+    assert markdown.startswith("# 量化因子知识库 / Quant Factor Wiki")
+    assert "- 因子 / Factors: 1" in markdown
+    assert "- 公式 / Formula: rank(return_5d)" in markdown
 
 
 def test_factor_wiki_store_writes_markdown_atomically(tmp_path: Path) -> None:
@@ -119,4 +130,4 @@ def test_build_factor_wiki_markdown_rejects_missing_factor_name() -> None:
     record["factor"] = {}
 
     with pytest.raises(ValueError, match="factor.name"):
-        build_factor_wiki_markdown([record])
+        build_factor_wiki_markdown([record], output_language="en")

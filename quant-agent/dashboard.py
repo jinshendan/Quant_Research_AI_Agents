@@ -19,6 +19,7 @@ from agents.memory_index import (
 from agents.memory_agent import DEFAULT_MEMORY_FILENAME, FactorMemoryStore
 from agents.report_agent import DEFAULT_REPORTS_DIRNAME
 from core.config import AppConfig
+from core.i18n import OutputLanguage, render_label
 from core.logging import AgentLoggerAdapter, get_agent_logger
 
 DASHBOARD_TITLE = "Quant Research Dashboard"
@@ -530,6 +531,7 @@ def render_streamlit_dashboard(
     import streamlit as st
 
     dashboard_config = config or AppConfig.from_env()
+    output_language = dashboard_config.output_language
     dashboard_logger = logger or get_agent_logger("Dashboard")
     paths = default_dashboard_paths(dashboard_config)
     data = load_dashboard_data(paths, logger=dashboard_logger)
@@ -543,63 +545,68 @@ def render_streamlit_dashboard(
         "Rendering dashboard.",
         extra={"action": "render_dashboard", "status": "running"},
     )
-    st.set_page_config(page_title=DASHBOARD_TITLE, layout="wide")
-    st.title(DASHBOARD_TITLE)
+    dashboard_title = _ui_label(DASHBOARD_TITLE, "量化研究 Dashboard", output_language)
+    st.set_page_config(page_title=dashboard_title, layout="wide")
+    st.title(dashboard_title)
 
     with st.sidebar:
-        st.header("Artifacts")
-        st.caption("Memory")
+        st.header(_ui_label("Artifacts", "产物", output_language))
+        st.caption(_ui_label("Memory", "记忆", output_language))
         st.code(str(paths.memory_path))
-        st.caption("Memory Index")
+        st.caption(_ui_label("Memory Index", "记忆索引", output_language))
         st.code(str(paths.memory_index_path))
-        st.caption("Wiki")
+        st.caption(_ui_label("Wiki", "知识库", output_language))
         st.code(str(paths.wiki_path))
-        st.caption("Reports")
+        st.caption(_ui_label("Reports", "报告", output_language))
         st.code(str(paths.report_dir))
 
     dashboard_tab, explorer_tab, search_tab = st.tabs(
-        ["Dashboard", "Factor Explorer", "Semantic Search"]
+        [
+            _ui_label("Dashboard", "仪表盘", output_language),
+            _ui_label("Factor Explorer", "因子浏览", output_language),
+            _ui_label("Semantic Search", "语义搜索", output_language),
+        ]
     )
 
     with dashboard_tab:
         metric_columns = st.columns(5)
-        metric_columns[0].metric("Records", summary["record_count"])
-        metric_columns[1].metric("Factors", summary["factor_count"])
-        metric_columns[2].metric("Passed", summary["passed_count"])
-        metric_columns[3].metric("Failed", summary["failed_count"])
-        metric_columns[4].metric("Reports", summary["report_count"])
+        metric_columns[0].metric(_ui_label("Records", "记录", output_language), summary["record_count"])
+        metric_columns[1].metric(_ui_label("Factors", "因子", output_language), summary["factor_count"])
+        metric_columns[2].metric(_ui_label("Passed", "通过", output_language), summary["passed_count"])
+        metric_columns[3].metric(_ui_label("Failed", "未通过", output_language), summary["failed_count"])
+        metric_columns[4].metric(_ui_label("Reports", "报告", output_language), summary["report_count"])
 
-        st.subheader("Factor Ranking")
+        st.subheader(_ui_label("Factor Ranking", "因子排名", output_language))
         if ranking_frame.empty:
-            st.info("No factor memory records found.")
+            st.info(_ui_label("No factor memory records found.", "未找到因子记忆记录。", output_language))
         else:
             st.dataframe(ranking_frame, use_container_width=True, hide_index=True)
 
         chart_columns = st.columns(2)
         with chart_columns[0]:
-            st.subheader("IC Distribution")
-            _render_distribution_chart(st, ic_distribution)
+            st.subheader(_ui_label("IC Distribution", "IC 分布", output_language))
+            _render_distribution_chart(st, ic_distribution, output_language=output_language)
         with chart_columns[1]:
-            st.subheader("Sharpe Distribution")
-            _render_distribution_chart(st, sharpe_distribution)
+            st.subheader(_ui_label("Sharpe Distribution", "夏普分布", output_language))
+            _render_distribution_chart(st, sharpe_distribution, output_language=output_language)
 
-        st.subheader("Generated Reports")
+        st.subheader(_ui_label("Generated Reports", "已生成报告", output_language))
         report_frame = pd.DataFrame(
             [report.to_dict() for report in data.report_summaries],
             columns=["title", "path", "byte_count", "modified_time"],
         )
         if report_frame.empty:
-            st.info("No markdown reports found.")
+            st.info(_ui_label("No markdown reports found.", "未找到 Markdown 报告。", output_language))
         else:
             st.dataframe(report_frame, use_container_width=True, hide_index=True)
 
     with explorer_tab:
-        st.subheader("Factor Explorer")
+        st.subheader(_ui_label("Factor Explorer", "因子浏览", output_language))
         if not explorer_options:
-            st.info("No factor memory records found.")
+            st.info(_ui_label("No factor memory records found.", "未找到因子记忆记录。", output_language))
         else:
             selected_label = st.selectbox(
-                "Factor memory record",
+                _ui_label("Factor memory record", "因子记忆记录", output_language),
                 [option.label for option in explorer_options],
             )
             selected_option = next(
@@ -610,29 +617,39 @@ def render_streamlit_dashboard(
                 memory_id=selected_option.memory_id,
             )
             if selected_record is None:
-                st.warning("Selected factor memory record is no longer available.")
+                st.warning(
+                    _ui_label(
+                        "Selected factor memory record is no longer available.",
+                        "所选因子记忆记录已不可用。",
+                        output_language,
+                    )
+                )
             else:
                 explorer_view = build_factor_explorer_view(
                     selected_record,
                     report_summaries=data.report_summaries,
                 )
-                _render_factor_explorer(st, explorer_view)
+                _render_factor_explorer(
+                    st,
+                    explorer_view,
+                    output_language=output_language,
+                )
 
     with search_tab:
-        st.subheader("Semantic Search")
+        st.subheader(_ui_label("Semantic Search", "语义搜索", output_language))
         search_query = st.text_input(
-            "Search factor memory",
+            _ui_label("Search factor memory", "搜索因子记忆", output_language),
             placeholder="momentum rank_ic sharpe drawdown",
         )
-        top_k = st.slider("Matches", min_value=1, max_value=10, value=5)
-        if st.button("Search", type="primary"):
+        top_k = st.slider(_ui_label("Matches", "匹配数量", output_language), min_value=1, max_value=10, value=5)
+        if st.button(_ui_label("Search", "搜索", output_language), type="primary"):
             search_view = run_semantic_memory_search(
                 paths,
                 search_query,
                 top_k=top_k,
                 report_summaries=data.report_summaries,
             )
-            _render_semantic_search(st, search_view)
+            _render_semantic_search(st, search_view, output_language=output_language)
 
     dashboard_logger.info(
         "Rendered dashboard.",
@@ -644,14 +661,30 @@ def main() -> None:
     render_streamlit_dashboard()
 
 
-def _render_distribution_chart(st: Any, distribution_frame: pd.DataFrame) -> None:
+def _render_distribution_chart(
+    st: Any,
+    distribution_frame: pd.DataFrame,
+    *,
+    output_language: OutputLanguage,
+) -> None:
     if distribution_frame.empty:
-        st.info("No numeric metric values found.")
+        st.info(
+            _ui_label(
+                "No numeric metric values found.",
+                "未找到数值型指标。",
+                output_language,
+            )
+        )
         return
     st.bar_chart(distribution_frame.set_index("bucket")["count"])
 
 
-def _render_factor_explorer(st: Any, view: FactorExplorerView) -> None:
+def _render_factor_explorer(
+    st: Any,
+    view: FactorExplorerView,
+    *,
+    output_language: OutputLanguage,
+) -> None:
     st.markdown(f"### {view.title}")
     metric_columns = st.columns(4)
     metric_columns[0].metric("RankIC", _format_optional_float(view.performance["rank_ic"]))
@@ -662,38 +695,54 @@ def _render_factor_explorer(st: Any, view: FactorExplorerView) -> None:
         _format_optional_float(view.performance["max_drawdown"]),
     )
 
-    st.markdown("#### Overview")
-    st.table(_section_frame(view.overview))
+    st.markdown(f"#### {_ui_label('Overview', '概览', output_language)}")
+    st.table(_section_frame(view.overview, output_language=output_language))
 
     detail_columns = st.columns(2)
     with detail_columns[0]:
-        st.markdown("#### Performance")
-        st.table(_section_frame(view.performance))
-        st.markdown("#### Benchmark")
-        st.table(_section_frame(view.benchmark))
+        st.markdown(f"#### {_ui_label('Performance', '表现', output_language)}")
+        st.table(_section_frame(view.performance, output_language=output_language))
+        st.markdown(f"#### {_ui_label('Benchmark', '基准', output_language)}")
+        st.table(_section_frame(view.benchmark, output_language=output_language))
     with detail_columns[1]:
-        st.markdown("#### Diagnostics")
-        st.table(_section_frame(view.diagnostics))
-        st.markdown("#### Artifacts")
-        st.table(_section_frame(view.artifacts))
+        st.markdown(f"#### {_ui_label('Diagnostics', '诊断', output_language)}")
+        st.table(_section_frame(view.diagnostics, output_language=output_language))
+        st.markdown(f"#### {_ui_label('Artifacts', '产物', output_language)}")
+        st.table(_section_frame(view.artifacts, output_language=output_language))
 
-    st.markdown("#### Report")
+    st.markdown(f"#### {_ui_label('Report', '报告', output_language)}")
     if view.report_summary is None:
-        st.info("No generated report matched this factor.")
+        st.info(
+            _ui_label(
+                "No generated report matched this factor.",
+                "没有匹配该因子的已生成报告。",
+                output_language,
+            )
+        )
     else:
-        st.table(_section_frame(view.report_summary.to_dict()))
+        st.table(
+            _section_frame(
+                view.report_summary.to_dict(),
+                output_language=output_language,
+            )
+        )
 
-    with st.expander("Raw memory record"):
+    with st.expander(_ui_label("Raw memory record", "原始记忆记录", output_language)):
         st.json(view.raw_record)
 
 
-def _render_semantic_search(st: Any, view: SemanticSearchView) -> None:
+def _render_semantic_search(
+    st: Any,
+    view: SemanticSearchView,
+    *,
+    output_language: OutputLanguage,
+) -> None:
     if view.error is not None:
         st.warning(view.error)
         return
 
     if not view.matches:
-        st.info("No semantic matches found.")
+        st.info(_ui_label("No semantic matches found.", "未找到语义匹配。", output_language))
         return
 
     result_frame = pd.DataFrame(
@@ -724,18 +773,36 @@ def _render_semantic_search(st: Any, view: SemanticSearchView) -> None:
                     match.report_summary
                 ] if match.report_summary is not None else [],
             )
-            _render_factor_explorer(st, explorer_view)
+            _render_factor_explorer(
+                st,
+                explorer_view,
+                output_language=output_language,
+            )
 
 
-def _section_frame(section: Mapping[str, Any]) -> pd.DataFrame:
+def _section_frame(
+    section: Mapping[str, Any],
+    *,
+    output_language: OutputLanguage,
+) -> pd.DataFrame:
     rows = [
         {
-            "field": str(key),
-            "value": _format_display_value(value),
+            _ui_label("field", "字段", output_language): str(key),
+            _ui_label("value", "值", output_language): _format_display_value(value),
         }
         for key, value in section.items()
     ]
-    return pd.DataFrame(rows, columns=["field", "value"])
+    return pd.DataFrame(
+        rows,
+        columns=[
+            _ui_label("field", "字段", output_language),
+            _ui_label("value", "值", output_language),
+        ],
+    )
+
+
+def _ui_label(en: str, zh: str, output_language: OutputLanguage) -> str:
+    return render_label(en, zh, output_language)
 
 
 def _factor_ranking_row(record: Mapping[str, Any]) -> dict[str, Any]:

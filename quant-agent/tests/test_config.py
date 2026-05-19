@@ -17,6 +17,7 @@ def test_config_uses_project_root_defaults(tmp_path: Path) -> None:
     assert config.factors_dir == tmp_path / "factors"
     assert config.memory_dir == tmp_path / "memory"
     assert config.log_level == "INFO"
+    assert config.output_language == "bilingual"
     assert config.log_file is None
 
 
@@ -28,6 +29,7 @@ def test_config_reads_relative_environment_paths(tmp_path: Path) -> None:
             "QUANT_AGENT_DUCKDB_PATH": "db/market.duckdb",
             "QUANT_AGENT_LOG_LEVEL": "debug",
             "QUANT_AGENT_LOG_FILE": "logs/app.log",
+            "QUANT_AGENT_OUTPUT_LANGUAGE": "zh-CN",
         },
     )
 
@@ -36,6 +38,7 @@ def test_config_reads_relative_environment_paths(tmp_path: Path) -> None:
     assert config.duckdb_path == tmp_path / "db" / "market.duckdb"
     assert config.log_level == "DEBUG"
     assert config.log_file == tmp_path / "logs" / "app.log"
+    assert config.output_language == "zh"
 
 
 def test_config_ensure_directories(tmp_path: Path) -> None:

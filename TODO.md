@@ -10,6 +10,8 @@ Current status:
 - It is not ready to be used as the sole basis for real-money trading decisions.
 - The next phase should prioritize reliable live data, realistic A-share
   constraints, and daily decision support.
+- Human-facing output now supports `bilingual`, `zh`, and `en`; structured JSON
+  keys remain English for stable agent interfaces.
 
 ## P0 --- Make Daily Research Usable
 
@@ -26,6 +28,12 @@ Current status:
   - [x] Run DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent -> ReportAgent
   - [x] Save a daily run manifest with all artifact paths
   - [x] Print a concise terminal summary for the day's run
+
+- [x] Support bilingual human-facing output
+  - [x] Add shared `core.i18n` language helpers
+  - [x] Add project-level `QUANT_AGENT_OUTPUT_LANGUAGE`
+  - [x] Render reports, Factor Wiki, daily summaries, AkShare smoke diagnostics, and dashboard labels in `bilingual`, `zh`, or `en`
+  - [x] Keep machine-readable JSON keys in stable English
 
 - [ ] Build a practical daily stock ranking output
   - [ ] Generate Top N candidate stocks after market close

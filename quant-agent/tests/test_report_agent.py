@@ -20,7 +20,10 @@ from core.models import AgentRequest
 
 
 def _config(tmp_path: Path) -> AppConfig:
-    return AppConfig.from_env(project_root=tmp_path, environ={})
+    return AppConfig.from_env(
+        project_root=tmp_path,
+        environ={"QUANT_AGENT_OUTPUT_LANGUAGE": "en"},
+    )
 
 
 def _memory_record(
@@ -99,6 +102,7 @@ def test_report_spec_accepts_memory_path_and_wiki_alias(tmp_path: Path) -> None:
     assert spec.factor_wiki_path == tmp_path / "memory" / "factor_wiki.md"
     assert spec.report_path == tmp_path / "reports" / "momentum.md"
     assert spec.report_title == "Momentum Factor Report"
+    assert spec.output_language is None
 
 
 def test_report_spec_rejects_missing_memory_source() -> None:
@@ -193,6 +197,30 @@ def test_report_agent_writes_custom_markdown_report_path(tmp_path: Path) -> None
     assert report_path.is_file()
 
 
+def test_report_agent_generates_bilingual_markdown_report(tmp_path: Path) -> None:
+    report_path = tmp_path / "reports" / "bilingual.md"
+    agent = ReportAgent(config=AppConfig.from_env(project_root=tmp_path, environ={}))
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "memory_record": _memory_record("memory-bilingual"),
+                "report_path": str(report_path),
+                "output_language": "bilingual",
+            }
+        )
+    )
+
+    markdown_report = response.output["report_markdown"]
+
+    assert response.status == "success"
+    assert response.output["output_language"] == "bilingual"
+    assert response.output["report_title"] == "研究报告：alpha_momentum / Research Report: alpha_momentum"
+    assert "# 研究报告：alpha_momentum / Research Report: alpha_momentum" in markdown_report
+    assert "## 研究假设 / Hypothesis" in markdown_report
+    assert "- 基准状态 / Benchmark status: 通过 / passed" in markdown_report
+
+
 def test_report_agent_requires_selector_for_multiple_records(tmp_path: Path) -> None:
     memory_path = tmp_path / "memory" / "factor_memory.jsonl"
     store = FactorMemoryStore(memory_path)
@@ -230,7 +258,8 @@ def test_build_report_draft_marks_failed_benchmark_as_needs_review() -> None:
         _memory_record(
             "memory-failed",
             benchmark_status="failed",
-        )
+        ),
+        output_language="en",
     )
 
     conclusion = draft.document["sections"][-1]
@@ -243,7 +272,7 @@ def test_build_report_draft_marks_failed_benchmark_as_needs_review() -> None:
 
 
 def test_render_report_markdown_outputs_expected_sections() -> None:
-    draft = build_report_draft(_memory_record("memory-1"))
+    draft = build_report_draft(_memory_record("memory-1"), output_language="en")
 
     markdown = render_report_markdown(draft.document)
 
@@ -256,7 +285,7 @@ def test_render_report_markdown_outputs_expected_sections() -> None:
 
 
 def test_render_report_markdown_rejects_missing_sections() -> None:
-    draft = build_report_draft(_memory_record("memory-1")).document
+    draft = build_report_draft(_memory_record("memory-1"), output_language="en").document
     draft.pop("sections")
 
     with pytest.raises(ValueError, match="sections"):
@@ -280,4 +309,4 @@ def test_build_report_draft_rejects_missing_factor_name() -> None:
     record["factor"] = {}
 
     with pytest.raises(ValueError, match="name"):
-        build_report_draft(record)
+        build_report_draft(record, output_language="en")
