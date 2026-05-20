@@ -38,6 +38,7 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
                     "output_dir": "runs",
                     "template_ids": ["close_to_open_return"],
                     "factor_set_name": "daily_test",
+                    "ranking_top_n": 5,
                     "output_language": "zh",
                 }
             }
@@ -52,6 +53,7 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
     assert spec.symbols == ("000001", "000002")
     assert spec.output_dir == Path("runs")
     assert spec.template_ids == ("close_to_open_return",)
+    assert spec.ranking_top_n == 5
     assert spec.output_language == "zh"
 
 
@@ -86,6 +88,7 @@ def test_run_daily_research_writes_manifest_and_artifacts(tmp_path: Path) -> Non
                 "market_condition": "offline_daily_fixture",
             },
             "preview_rows": 2,
+            "ranking_top_n": 3,
         }
     )
 
@@ -106,16 +109,26 @@ def test_run_daily_research_writes_manifest_and_artifacts(tmp_path: Path) -> Non
     assert manifest["status"] == "success"
     assert manifest["run_id"] == "daily-e2e"
     assert manifest["output_language"] == "bilingual"
-    assert set(manifest["stages"]) == {"data", "feature", "backtest", "memory", "report"}
+    assert set(manifest["stages"]) == {
+        "data",
+        "feature",
+        "backtest",
+        "ranking",
+        "memory",
+        "report",
+    }
     assert manifest["summary"]["factor_column"] == "factor__close_to_open_return"
     assert manifest["summary"]["benchmark_status"] == "passed"
     assert manifest["summary"]["memory_id"].startswith("factor-memory-")
+    assert manifest["summary"]["top_ranked_symbols"] == ["000006", "000005", "000004"]
 
     artifact_keys = (
         "aligned_data_path",
         "factor_manifest_path",
         "factor_matrix_path",
         "result_json_path",
+        "ranking_path",
+        "ranking_markdown_path",
         "memory_path",
         "vector_index_path",
         "vector_metadata_path",

@@ -49,6 +49,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | Factor wiki | 已实现 | 自动生成因子知识库 Markdown |
 | ReportAgent | 已实现 | 生成结构化研究报告和 Markdown 报告 |
 | 中英双语输出 | 已实现 | 报告、Factor Wiki、daily 摘要、AkShare smoke、dashboard 支持 `en` / `zh` / `bilingual` |
+| DailyRankingAgent | 已实现 | 生成每日 Top N 候选股票排名 CSV 和 Markdown |
 | Streamlit dashboard | 已实现 | 因子排名、指标分布、报告列表 |
 | Factor Explorer | 已实现 | 查看单个因子记录、诊断和关联报告 |
 | Semantic Search UI | 已实现 | dashboard 中搜索历史因子记忆 |
@@ -65,6 +66,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | 保存因子研究记录和 FAISS 索引 |
 | ReportAgent | `quant-agent/agents/report_agent.py` | 生成 Markdown 研究报告 |
+| DailyRankingAgent | `quant-agent/agents/daily_ranking.py` | 生成每日候选股票排名 |
 | I18N | `quant-agent/core/i18n.py` | 统一管理中英双语输出标签 |
 | Daily Research | `quant-agent/scripts/run_daily_research.py` | 串联每日研究 pipeline 并输出运行清单 |
 | Dashboard | `quant-agent/dashboard.py` | 交互式查看因子、报告和语义搜索 |
@@ -177,6 +179,7 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
   "factor_set_name": "daily_demo",
   "factor_direction": "positive",
   "quantile_count": 5,
+  "ranking_top_n": 10,
   "output_language": "bilingual",
   "factor_metadata": {
     "name": "daily_close_to_open",
@@ -186,9 +189,17 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
 }
 ```
 
-该脚本会依次运行 `DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent
--> ReportAgent`，并在 `output_dir/run_id/daily_research_manifest.json` 保存
+该脚本会依次运行 `DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent
+-> MemoryAgent -> ReportAgent`，并在 `output_dir/run_id/daily_research_manifest.json` 保存
 本次运行清单和关键 artifact 路径。
+同时会生成每日候选股排名：
+
+- `output_dir/run_id/daily_stock_ranking.csv`
+- `output_dir/run_id/daily_stock_ranking.md`
+
+排名包含因子分数、排名、近 5 日收益、20 日波动率、20 日回撤、换手率、
+入选理由和风险提示。当前排名是研究辅助输出，不含 T+1、涨跌停、ST、交易成本等
+实盘约束，这些仍在后续 P0 任务中。
 
 运行 dashboard：
 
@@ -406,6 +417,7 @@ for real-money trading decisions.
 | Factor wiki | Done | Markdown factor knowledge base |
 | ReportAgent | Done | Structured draft and Markdown report generation |
 | Bilingual output | Done | Reports, Factor Wiki, daily summaries, AkShare smoke, and dashboard support `en` / `zh` / `bilingual` |
+| DailyRankingAgent | Done | Daily Top N candidate stock ranking as CSV and Markdown |
 | Streamlit dashboard | Done | Factor ranking, metric distributions, report inventory |
 | Factor Explorer | Done | Single-factor diagnostics and linked reports |
 | Semantic Search UI | Done | Search historical factor memory from the dashboard |
@@ -422,6 +434,7 @@ for real-money trading decisions.
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | Store factor research records and FAISS indexes |
 | ReportAgent | `quant-agent/agents/report_agent.py` | Generate Markdown research reports |
+| DailyRankingAgent | `quant-agent/agents/daily_ranking.py` | Generate daily candidate stock rankings |
 | I18N | `quant-agent/core/i18n.py` | Shared bilingual output labels |
 | Daily Research | `quant-agent/scripts/run_daily_research.py` | Run the daily pipeline and write a run manifest |
 | Dashboard | `quant-agent/dashboard.py` | Inspect factors, reports, and semantic search results |
@@ -506,6 +519,7 @@ Minimal JSON config:
   "factor_set_name": "daily_demo",
   "factor_direction": "positive",
   "quantile_count": 5,
+  "ranking_top_n": 10,
   "output_language": "bilingual",
   "factor_metadata": {
     "name": "daily_close_to_open",
@@ -515,9 +529,19 @@ Minimal JSON config:
 }
 ```
 
-The script runs `DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent ->
-ReportAgent` and writes `output_dir/run_id/daily_research_manifest.json` with
-stage summaries and artifact paths.
+The script runs `DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent
+-> MemoryAgent -> ReportAgent` and writes
+`output_dir/run_id/daily_research_manifest.json` with stage summaries and
+artifact paths.
+It also writes:
+
+- `output_dir/run_id/daily_stock_ranking.csv`
+- `output_dir/run_id/daily_stock_ranking.md`
+
+The ranking includes factor score, rank, recent 5-day return, 20-day volatility,
+20-day drawdown, turnover, reason text, and risk text. It is research support
+only; T+1, price-limit, ST, suspension, cost, and slippage constraints are still
+separate P0 roadmap items.
 
 Run tests and checks:
 
@@ -532,7 +556,7 @@ python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.p
 The current practical flow is:
 
 ```text
-DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent -> ReportAgent -> Dashboard
+DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent -> Dashboard
 ```
 
 Example data request:

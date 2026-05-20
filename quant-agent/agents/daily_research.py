@@ -12,6 +12,10 @@ from typing import Any
 
 from agents.backtest_agent import BacktestAgent, default_benchmark_thresholds
 from agents.data_agent import DataAgent
+from agents.daily_ranking import (
+    DEFAULT_RANKING_TOP_N,
+    DailyRankingAgent,
+)
 from agents.feature_agent import FeatureAgent
 from agents.market_data_provider import MarketDataProvider
 from agents.memory_agent import MemoryAgent
@@ -45,6 +49,12 @@ SUMMARY_LABELS = {
     "factor_column": LocalizedText(en="factor_column", zh="因子列"),
     "benchmark_status": LocalizedText(en="benchmark_status", zh="基准状态"),
     "memory_id": LocalizedText(en="memory_id", zh="记忆 ID"),
+    "top_ranked_symbols": LocalizedText(en="top_ranked_symbols", zh="排名靠前股票"),
+    "ranking_path": LocalizedText(en="ranking_path", zh="排名 CSV 路径"),
+    "ranking_markdown_path": LocalizedText(
+        en="ranking_markdown_path",
+        zh="排名 Markdown 路径",
+    ),
     "report_path": LocalizedText(en="report_path", zh="报告路径"),
 }
 
@@ -82,6 +92,7 @@ class DailyResearchSpec:
     )
     factor_metadata: dict[str, Any] = field(default_factory=dict)
     preview_rows: int = DEFAULT_DAILY_PREVIEW_ROWS
+    ranking_top_n: int = DEFAULT_RANKING_TOP_N
     output_language: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE
 
     def __post_init__(self) -> None:
@@ -175,6 +186,13 @@ class DailyResearchSpec:
                 minimum=0,
                 maximum=50,
             ),
+            ranking_top_n=_optional_int(
+                raw,
+                "ranking_top_n",
+                DEFAULT_RANKING_TOP_N,
+                minimum=1,
+                maximum=200,
+            ),
             output_language=_optional_output_language(raw),
         )
 
@@ -220,6 +238,7 @@ class DailyResearchSpec:
             "benchmark_thresholds": dict(self.benchmark_thresholds),
             "factor_metadata": dict(self.factor_metadata),
             "preview_rows": self.preview_rows,
+            "ranking_top_n": self.ranking_top_n,
             "output_language": self.output_language,
         }
 
@@ -334,6 +353,33 @@ def run_daily_research(
         stages["backtest"] = _backtest_stage(backtest_response)
         artifacts.update(stages["backtest"]["artifacts"])
 
+        factor_matrix_path = _required_nested_output_path(
+            feature_response,
+            "storage_stats",
+            "matrix_path",
+            stage="feature",
+        )
+        ranking_path = run_dir / "daily_stock_ranking.csv"
+        ranking_markdown_path = run_dir / "daily_stock_ranking.md"
+        ranking_response = DailyRankingAgent(config=config).run(
+            AgentRequest.create(
+                {
+                    "factor_matrix_path": str(factor_matrix_path),
+                    "aligned_data_path": str(aligned_data_path),
+                    "factor_column": factor_column,
+                    "factor_direction": spec.factor_direction,
+                    "top_n": spec.ranking_top_n,
+                    "ranking_path": str(ranking_path),
+                    "ranking_markdown_path": str(ranking_markdown_path),
+                    "output_language": spec.output_language,
+                },
+                task_id=f"{run_id}-ranking",
+            )
+        )
+        _require_success(ranking_response, "ranking")
+        stages["ranking"] = _ranking_stage(ranking_response)
+        artifacts.update(stages["ranking"]["artifacts"])
+
         result_json_path = _required_output_path(
             backtest_response,
             "result_json_path",
@@ -446,6 +492,9 @@ def format_daily_research_summary(
         "factor_column",
         "benchmark_status",
         "memory_id",
+        "top_ranked_symbols",
+        "ranking_path",
+        "ranking_markdown_path",
         "report_path",
     ):
         value = summary.get(key)
@@ -637,6 +686,28 @@ def _memory_stage(response: AgentResponse) -> dict[str, Any]:
     }
 
 
+def _ranking_stage(response: AgentResponse) -> dict[str, Any]:
+    output = response.output
+    return {
+        "status": response.status,
+        "task_id": response.metadata.get("task_id"),
+        "artifacts": {
+            "ranking_path": _optional_output_path(output, "ranking_path"),
+            "ranking_markdown_path": _optional_output_path(
+                output,
+                "ranking_markdown_path",
+            ),
+        },
+        "summary": {
+            "ranking_date": output.get("ranking_date"),
+            "factor_column": output.get("factor_column"),
+            "row_count": output.get("row_count"),
+            "top_symbols": output.get("top_symbols"),
+            "ranking_stats": output.get("ranking_stats"),
+        },
+    }
+
+
 def _report_stage(response: AgentResponse) -> dict[str, Any]:
     output = response.output
     return {
@@ -660,6 +731,8 @@ def _summary(
     data = _stage_summary(stages, "data")
     feature = _stage_summary(stages, "feature")
     backtest = _stage_summary(stages, "backtest")
+    ranking = _stage_summary(stages, "ranking")
+    ranking_artifacts = _stage_artifacts(stages, "ranking")
     memory = _stage_summary(stages, "memory")
     report_artifacts = _stage_artifacts(stages, "report")
     return {
@@ -669,6 +742,9 @@ def _summary(
         "factor_column": backtest.get("factor_column"),
         "benchmark_status": backtest.get("benchmark_status"),
         "memory_id": memory.get("memory_id"),
+        "top_ranked_symbols": ranking.get("top_symbols"),
+        "ranking_path": ranking_artifacts.get("ranking_path"),
+        "ranking_markdown_path": ranking_artifacts.get("ranking_markdown_path"),
         "report_path": report_artifacts.get("report_path"),
         "output_language": output_language,
     }

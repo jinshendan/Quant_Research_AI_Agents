@@ -1319,20 +1319,61 @@ Implemented in `quant-agent/`:
 
 -   `DailyResearchSpec` for validating `.json` or `.toml` pipeline configs
 -   `run_daily_research(...)` for orchestrating:
-    `DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent -> ReportAgent`
+    `DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent`
 -   `scripts/run_daily_research.py` CLI for running the pipeline from a config
     file
 -   per-run output directory under `output_dir/run_id/`
 -   `daily_research_manifest.json` with schema version, stage summaries,
     artifact paths, request echo, elapsed time, status, and error details
 -   terminal summary with run status, manifest path, factor column, benchmark
-    status, memory ID, and report path
+    status, memory ID, ranking paths, and report path
 -   offline tests for config loading, success manifest generation, and error
     manifest generation
 
 The script intentionally consumes the existing agent interfaces instead of
-adding a separate orchestration framework. Ranking output remains the next P0
-task in `TODO.md`.
+adding a separate orchestration framework.
+
+## Daily Stock Ranking Output
+
+Implemented in `quant-agent/`:
+
+-   `DailyRankingAgent` in `agents/daily_ranking.py`
+-   `DailyRankingSpec` request contract:
+    -   `factor_matrix_path`
+    -   `aligned_data_path`
+    -   `factor_column`
+    -   `factor_direction`
+    -   `top_n`
+    -   optional `as_of_date`
+    -   `ranking_path`
+    -   `ranking_markdown_path`
+    -   `output_language`
+-   ranking date selection uses the latest available factor-score date, or the
+    latest date on or before `as_of_date`
+-   ranking score honors factor direction:
+    -   `positive`: larger factor score ranks higher
+    -   `negative`: smaller factor score ranks higher
+-   candidate rows exclude missing factor scores and rows marked
+    `is_suspended_or_missing`
+-   ranking output fields:
+    -   rank
+    -   symbol
+    -   factor score
+    -   recent 5-day return
+    -   20-day volatility
+    -   20-day drawdown
+    -   turnover rate
+    -   reason text
+    -   risk text
+-   artifacts:
+    -   `daily_stock_ranking.csv`
+    -   `daily_stock_ranking.md`
+-   the daily research manifest now includes a `ranking` stage and artifact
+    paths for both ranking files
+
+The ranking intentionally remains a research-support artifact. A-share trading
+constraints, transaction costs, slippage, and position sizing remain separate P0
+tasks.
 
 ## Project Output Language
 

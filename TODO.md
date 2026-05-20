@@ -27,7 +27,7 @@ Current status:
 - [x] Add a daily research pipeline script
   - [x] Create `scripts/run_daily_research.py`
   - [x] Accept config for universe, symbols, date range, factor set, and output dir
-  - [x] Run DataAgent -> FeatureAgent -> BacktestAgent -> MemoryAgent -> ReportAgent
+  - [x] Run DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent
   - [x] Save a daily run manifest with all artifact paths
   - [x] Print a concise terminal summary for the day's run
 
@@ -37,12 +37,12 @@ Current status:
   - [x] Render reports, Factor Wiki, daily summaries, AkShare smoke diagnostics, and dashboard labels in `bilingual`, `zh`, or `en`
   - [x] Keep machine-readable JSON keys in stable English
 
-- [ ] Build a practical daily stock ranking output
-  - [ ] Generate Top N candidate stocks after market close
-  - [ ] Include factor score, rank, recent return, volatility, drawdown, and turnover
-  - [ ] Add reason text explaining why each stock is selected
-  - [ ] Add risk text explaining why each stock could fail
-  - [ ] Save ranking output as CSV and Markdown
+- [x] Build a practical daily stock ranking output
+  - [x] Generate Top N candidate stocks after market close
+  - [x] Include factor score, rank, recent return, volatility, drawdown, and turnover
+  - [x] Add reason text explaining why each stock is selected
+  - [x] Add risk text explaining why each stock could fail
+  - [x] Save ranking output as CSV and Markdown
 
 - [ ] Add A-share trading constraints
   - [ ] Handle T+1 assumptions
