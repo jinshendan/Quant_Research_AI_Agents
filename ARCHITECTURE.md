@@ -1567,6 +1567,80 @@ buy/sell/hold instructions. Its job is to prevent a generated ranking or report
 from being misread as usable trading evidence when the underlying factor quality
 is weak. DecisionAgent remains the next layer for watchlist-level decisions.
 
+## ExperimentAgent and ExperimentStore MVP
+
+Implemented in `quant-agent/`:
+
+-   `ExperimentAgent` in `agents/experiment_agent.py`
+-   `ExperimentSpec` request validation for batch factor experiments
+-   `ExperimentStore` in `agents/experiment_store.py`
+-   batch evaluation of multiple factor columns from one saved factor manifest
+-   per-factor orchestration:
+    `BacktestAgent -> CriticAgent`
+-   automatic use of factor direction from manifest `factor_definitions` when
+    available, with explicit payload overrides through `factor_directions`
+-   per-factor persisted backtest JSON artifacts under
+    `experiments/{experiment_id}/backtests/`
+-   experiment-level artifact persistence:
+    -   `experiment_result.json`
+    -   `experiment_summary.csv`
+-   structured records for status, failed stage, benchmark status, failed
+    benchmark tests, critic verdict, critic severity, metric snapshot, and
+    result path
+-   tests for request normalization, batch success/rejection behavior, unknown
+    factor validation, JSON persistence, and CSV summary output
+
+Current ExperimentAgent payload:
+
+```json
+{
+  "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
+  "experiment_id": "custom_batch_experiment_v1",
+  "factor_columns": ["factor__return_5d", "factor__momentum_volume_blend"],
+  "factor_direction": "positive",
+  "factor_directions": {
+    "factor__short_reversal": "negative"
+  },
+  "forward_return_days": 1,
+  "quantile_count": 5,
+  "benchmark_thresholds": {
+    "min_mean_rank_ic": 0.02,
+    "min_sharpe": 0.5,
+    "max_drawdown_abs": 0.35
+  },
+  "transaction_costs": {
+    "enabled": true,
+    "commission_rate": 0.0003,
+    "stamp_duty_rate": 0.0005,
+    "transfer_fee_rate": 0.00001,
+    "slippage_rate": 0.0005
+  },
+  "output_dir": "experiments",
+  "output_language": "bilingual"
+}
+```
+
+Current ExperimentAgent output:
+
+```text
+state = experiment_completed
+experiment_id
+experiment_status
+factor_count
+successful_factor_count
+failed_factor_count
+records
+summary
+storage_stats
+```
+
+The MVP deliberately evaluates factors that already exist in a persisted factor
+manifest. It does not yet generate new candidate formulas, execute those
+formulas through FeatureAgent, maintain a historical JSONL/DuckDB experiment
+index, or perform sample-out validation. Those capabilities remain in the P1
+and P2 TODO items because they need stricter data lineage, configuration hashes,
+and train/validation/test boundaries.
+
 ## Project Output Language
 
 Implemented in `quant-agent/`:

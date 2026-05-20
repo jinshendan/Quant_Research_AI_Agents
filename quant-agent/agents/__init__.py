@@ -57,6 +57,11 @@ from agents.duckdb_store import (
     MarketDataStorageContext,
     MarketDataStorageResult,
 )
+from agents.experiment_agent import ExperimentAgent, ExperimentSpec
+from agents.experiment_store import (
+    ExperimentStorageResult,
+    ExperimentStore,
+)
 from agents.factor_templates import (
     FactorTemplate,
     FactorTemplateLibrary,
@@ -175,6 +180,10 @@ __all__ = [
     "DailyResearchSpec",
     "DuckDBMarketDataStore",
     "DrawdownResult",
+    "ExperimentAgent",
+    "ExperimentSpec",
+    "ExperimentStorageResult",
+    "ExperimentStore",
     "FactorBatchResult",
     "FactorCritique",
     "FactorCandidateGenerator",

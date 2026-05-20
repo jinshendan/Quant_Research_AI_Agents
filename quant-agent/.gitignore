@@ -14,4 +14,4 @@ data/cache/*
 !data/cache/.gitkeep
 memory/vector_db/*
 !memory/vector_db/.gitkeep
-
+experiments/

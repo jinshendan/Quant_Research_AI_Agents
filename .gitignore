@@ -16,6 +16,7 @@ quant-agent/.mypy_cache/
 # Runtime research artifacts
 quant-agent/daily_runs/
 quant-agent/daily_rankings/
+quant-agent/experiments/
 quant-agent/tmp/
 quant-agent/research_logs/
 quant-agent/results/

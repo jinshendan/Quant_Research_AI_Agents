@@ -27,9 +27,9 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 当前项目还没有达到 Hedge Fund Quant Research 标准，核心缺口是：
 
 - 因子主要来自模板，不是真正的批量假设生成和挖掘。
-- 当前 daily config 如果给多个模板，pipeline 仍可能只选第一个因子做回测和排名。
+- Daily pipeline 已修正为必须显式选择目标因子或组合因子，但还没有批量实验闭环。
 - 缺少样本外、walk-forward、因子衰减、分层稳定性和中性化验证。
-- 缺少实验数据库，不能系统比较几百个候选因子。
+- ExperimentAgent / ExperimentStore 已有 MVP，但还缺实验历史库和查询能力，不能系统比较几百个候选因子。
 - 缺少多因子组合、因子相关性控制和组合 alpha 构建。
 - 缺少面向单只股票的入场、退出、仓位和反证条件。
 
@@ -70,16 +70,19 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 
 - [ ] 构建 ExperimentAgent
   - [ ] 批量生成候选因子实验任务
-  - [ ] 批量运行 FeatureAgent 和 BacktestAgent
-  - [ ] 批量调用 CriticAgent 审查结果
-  - [ ] 保存每个实验的 config、数据范围、universe、因子定义和结果 artifact
-  - [ ] 输出实验汇总表
+  - [x] 批量运行 BacktestAgent 评估 factor manifest 中的多个因子
+  - [x] 批量调用 CriticAgent 审查结果
+  - [x] 保存每个实验的 config、因子定义和结果 artifact
+  - [x] 输出实验汇总表
+  - [ ] 串联 FeatureAgent，从候选因子定义自动生成 factor manifest
 
 - [ ] 增加 ExperimentStore
+  - [x] 保存单次实验结果到本地 JSON + CSV summary
+  - [x] 记录实验 ID、运行时间、请求配置、因子定义和 artifact 路径
   - [ ] 保存所有实验结果到本地 JSONL / DuckDB
-  - [ ] 记录实验 ID、运行时间、git commit、数据版本、配置 hash
+  - [ ] 记录 git commit、数据版本、配置 hash
   - [ ] 支持按因子类别、股票池、日期范围和 verdict 查询历史实验
-  - [ ] 支持对失败实验记录失败原因，避免重复浪费时间
+  - [x] 支持对失败实验记录失败原因，避免重复浪费时间
 
 - [ ] 增加候选因子生成空间
   - [ ] 动量类：1/3/5/10/20/60 日收益、相对强弱、趋势斜率
@@ -264,10 +267,10 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 
 ## 建议下一步
 
-优先做 P0，而不是继续堆更多简单模板因子：
+优先继续完成 P1/P2，而不是继续堆更多简单模板因子：
 
-1. 构建 ExperimentAgent，把单次日报升级为批量因子实验。
-2. 增加 ExperimentStore，保存实验配置、数据版本、因子定义和结果。
+1. 扩展 ExperimentStore，增加 JSONL 或 DuckDB 历史实验索引和查询能力。
+2. 串联 FactorGenerationAgent 和 FeatureAgent，让 ExperimentAgent 能从候选定义自动生成 factor manifest。
 3. 增加样本外验证和因子衰减测试，防止过拟合。
 4. 增加因子相关性分析，避免重复研究高度相似信号。
 5. 在有了通过验证的候选 alpha 后，再构建 DecisionAgent 来服务银轮股份这类单票观察。
