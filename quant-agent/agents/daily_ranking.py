@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from time import perf_counter
@@ -11,6 +11,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from agents.ashare_trading_constraints import (
+    AshareTradingConstraintSpec,
+    apply_ashare_trading_constraints,
+)
 from core.config import AppConfig
 from core.i18n import (
     DEFAULT_OUTPUT_LANGUAGE,
@@ -44,6 +48,10 @@ RANKING_LABELS = {
     "volatility_20d": LocalizedText(en="20D volatility", zh="20 日波动率"),
     "drawdown_20d": LocalizedText(en="20D drawdown", zh="20 日回撤"),
     "turnover_rate": LocalizedText(en="Turnover", zh="换手率"),
+    "trading_constraints": LocalizedText(
+        en="Trading constraints",
+        zh="交易约束",
+    ),
     "reason": LocalizedText(en="Reason", zh="入选理由"),
     "risk": LocalizedText(en="Risk", zh="风险提示"),
 }
@@ -61,6 +69,9 @@ class DailyRankingSpec:
     as_of_date: date | None = None
     ranking_path: Path | None = None
     ranking_markdown_path: Path | None = None
+    trading_constraints: AshareTradingConstraintSpec = field(
+        default_factory=AshareTradingConstraintSpec,
+    )
     output_language: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE
 
     def __post_init__(self) -> None:
@@ -87,6 +98,9 @@ class DailyRankingSpec:
             as_of_date=_optional_date(payload, "as_of_date"),
             ranking_path=_optional_path(payload, "ranking_path"),
             ranking_markdown_path=_optional_path(payload, "ranking_markdown_path"),
+            trading_constraints=AshareTradingConstraintSpec.from_mapping(
+                _optional_mapping(payload, "trading_constraints"),
+            ),
             output_language=_optional_output_language(payload),
         )
 
@@ -102,6 +116,7 @@ class DailyRankingSpec:
             "ranking_markdown_path": (
                 str(self.ranking_markdown_path) if self.ranking_markdown_path else None
             ),
+            "trading_constraints": self.trading_constraints.to_dict(),
             "output_language": self.output_language,
         }
 
@@ -295,18 +310,21 @@ def build_daily_stock_ranking(
     """Build a Top N candidate stock ranking for the latest available date."""
 
     factors = _normalize_factor_matrix(factor_matrix, spec.factor_column)
-    market = _with_risk_metrics(_normalize_aligned_data(aligned_data))
+    market_base = _normalize_aligned_data(aligned_data)
+    constraint_result = apply_ashare_trading_constraints(
+        market_base,
+        spec=spec.trading_constraints,
+    )
+    market = _with_risk_metrics(constraint_result.data)
     merged = factors.merge(market, on=["date", "symbol"], how="left")
     ranking_date = _select_ranking_date(
         merged,
         factor_column=spec.factor_column,
         as_of_date=spec.as_of_date,
     )
-    latest = merged.loc[merged["date"].dt.date == ranking_date].copy()
-    latest = latest.loc[
-        latest[spec.factor_column].notna()
-        & ~latest["is_suspended_or_missing"].fillna(False).astype(bool)
-    ].copy()
+    latest_all = merged.loc[merged["date"].dt.date == ranking_date].copy()
+    latest = latest_all.loc[latest_all[spec.factor_column].notna()].copy()
+    latest = latest.loc[latest["is_trade_eligible"].fillna(False).astype(bool)].copy()
     if latest.empty:
         msg = f"No eligible symbols for ranking date {ranking_date.isoformat()}."
         raise ValueError(msg)
@@ -347,6 +365,15 @@ def build_daily_stock_ranking(
         "volatility_20d",
         "drawdown_20d",
         "turnover_rate",
+        "is_limit_up",
+        "is_limit_down",
+        "is_st",
+        "is_new_stock",
+        "is_delisting_risk",
+        "is_suspended_or_missing",
+        "is_t_plus_one",
+        "is_trade_eligible",
+        "trade_constraint_reason",
         "reason",
         "risk",
     ]
@@ -355,11 +382,23 @@ def build_daily_stock_ranking(
     stats = {
         "ranking_date": ranking_date.isoformat(),
         "input_symbol_count": int(merged.loc[merged["date"].dt.date == ranking_date, "symbol"].nunique()),
+        "factor_scored_symbol_count": int(
+            latest_all.loc[latest_all[spec.factor_column].notna(), "symbol"].nunique(),
+        ),
         "eligible_symbol_count": eligible_symbol_count,
+        "excluded_symbol_count": int(
+            latest_all.loc[
+                latest_all[spec.factor_column].notna()
+                & ~latest_all["is_trade_eligible"].fillna(False).astype(bool),
+                "symbol",
+            ].nunique(),
+        ),
         "row_count": int(len(ranking)),
         "requested_top_n": spec.top_n,
         "factor_column": spec.factor_column,
         "factor_direction": spec.factor_direction,
+        "constraint_stats": constraint_result.stats,
+        "ranking_date_constraint_counts": _constraint_counts(latest_all),
     }
     return DailyRankingBuildResult(
         data=ranking,
@@ -394,12 +433,13 @@ def render_daily_stock_ranking_markdown(
                 _label("volatility_20d", language),
                 _label("drawdown_20d", language),
                 _label("turnover_rate", language),
+                _label("trading_constraints", language),
                 _label("reason", language),
                 _label("risk", language),
             ]
         )
         + " |",
-        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |",
+        "| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
     ]
     for row in result.data.to_dict("records"):
         lines.append(
@@ -413,6 +453,7 @@ def render_daily_stock_ranking_markdown(
                     _format_decimal_percent(row["volatility_20d"]),
                     _format_decimal_percent(row["drawdown_20d"]),
                     _format_turnover(row["turnover_rate"]),
+                    _markdown_cell(_constraint_display_text(row, language)),
                     _markdown_cell(row["reason"]),
                     _markdown_cell(row["risk"]),
                 ]
@@ -479,11 +520,23 @@ def _normalize_aligned_data(frame: pd.DataFrame) -> pd.DataFrame:
     normalized = frame.copy()
     normalized["date"] = pd.to_datetime(normalized["date"], errors="coerce")
     normalized["symbol"] = normalized["symbol"].astype(str).str.zfill(6)
-    normalized["close"] = pd.to_numeric(normalized["close"], errors="coerce")
-    normalized["turnover_rate"] = pd.to_numeric(
-        normalized["turnover_rate"],
-        errors="coerce",
-    )
+    numeric_columns = [
+        column
+        for column in (
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "turnover_rate",
+            "trading_days_since_listing",
+            "listed_trading_days",
+        )
+        if column in normalized.columns
+    ]
+    for column in numeric_columns:
+        normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
     if "is_suspended_or_missing" in normalized.columns:
         normalized["is_suspended_or_missing"] = (
             normalized["is_suspended_or_missing"].fillna(False).astype(bool)
@@ -497,9 +550,26 @@ def _normalize_aligned_data(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _with_risk_metrics(frame: pd.DataFrame) -> pd.DataFrame:
-    enriched = frame[
-        ["date", "symbol", "close", "turnover_rate", "is_suspended_or_missing"]
-    ].copy()
+    passthrough_columns = [
+        column
+        for column in (
+            "date",
+            "symbol",
+            "close",
+            "turnover_rate",
+            "is_suspended_or_missing",
+            "is_limit_up",
+            "is_limit_down",
+            "is_st",
+            "is_new_stock",
+            "is_delisting_risk",
+            "is_t_plus_one",
+            "is_trade_eligible",
+            "trade_constraint_reason",
+        )
+        if column in frame.columns
+    ]
+    enriched = frame[passthrough_columns].copy()
     grouped_close = enriched.groupby("symbol", sort=False)["close"]
     daily_return = grouped_close.pct_change()
     enriched["recent_return_5d"] = grouped_close.pct_change(DEFAULT_RECENT_RETURN_DAYS)
@@ -561,7 +631,11 @@ def _risk_text(row: pd.Series, *, spec: DailyRankingSpec) -> str:
             "news, and tradability before trading."
         )
         zh = "部分近期风险指标历史不足；交易前需要复核流动性、新闻和可交易性。"
-        return LocalizedText(en=en, zh=zh).render(spec.output_language)
+        return _append_constraint_risk(
+            LocalizedText(en=en, zh=zh),
+            row,
+            output_language=spec.output_language,
+        )
 
     en = (
         f"20D drawdown {_format_decimal_percent(row['drawdown_20d'])}, "
@@ -575,7 +649,76 @@ def _risk_text(row: pd.Series, *, spec: DailyRankingSpec) -> str:
         f"换手率 {_format_turnover(row['turnover_rate'])}；"
         "需要人工复核流动性和事件风险。"
     )
-    return LocalizedText(en=en, zh=zh).render(spec.output_language)
+    return _append_constraint_risk(
+        LocalizedText(en=en, zh=zh),
+        row,
+        output_language=spec.output_language,
+    )
+
+
+def _append_constraint_risk(
+    base: LocalizedText,
+    row: pd.Series,
+    *,
+    output_language: OutputLanguage,
+) -> str:
+    notes: list[LocalizedText] = []
+    if bool(row.get("is_t_plus_one", False)):
+        notes.append(
+            LocalizedText(
+                en="A-share T+1 applies after entry.",
+                zh="买入后适用 A 股 T+1。",
+            )
+        )
+    if bool(row.get("is_limit_up", False)):
+        notes.append(
+            LocalizedText(
+                en="Limit-up close detected; next-session entry liquidity may be poor.",
+                zh="检测到涨停收盘；次日买入流动性可能较差。",
+            )
+        )
+    if bool(row.get("is_limit_down", False)):
+        notes.append(
+            LocalizedText(
+                en="Limit-down close detected; volatility and exit risk are elevated.",
+                zh="检测到跌停收盘；波动和退出风险较高。",
+            )
+        )
+    rendered = [base.render(output_language)]
+    rendered.extend(note.render(output_language) for note in notes)
+    return " ".join(rendered)
+
+
+def _constraint_display_text(
+    row: Mapping[Any, Any],
+    output_language: OutputLanguage,
+) -> str:
+    status = (
+        LocalizedText(en="eligible", zh="可交易")
+        if bool(row.get("is_trade_eligible", False))
+        else LocalizedText(en="excluded", zh="已过滤")
+    )
+    notes: list[LocalizedText] = []
+    if bool(row.get("is_t_plus_one", False)):
+        notes.append(LocalizedText(en="T+1", zh="A 股 T+1"))
+    if bool(row.get("is_limit_up", False)):
+        notes.append(LocalizedText(en="limit up", zh="涨停"))
+    if bool(row.get("is_limit_down", False)):
+        notes.append(LocalizedText(en="limit down", zh="跌停"))
+    if bool(row.get("is_st", False)):
+        notes.append(LocalizedText(en="ST", zh="ST"))
+    if bool(row.get("is_new_stock", False)):
+        notes.append(LocalizedText(en="new stock", zh="新股"))
+    if bool(row.get("is_delisting_risk", False)):
+        notes.append(LocalizedText(en="delisting risk", zh="退市风险"))
+    if bool(row.get("is_suspended_or_missing", False)):
+        notes.append(LocalizedText(en="suspended/missing", zh="停牌/缺失"))
+
+    rendered = status.render(output_language)
+    if not notes:
+        return rendered
+    rendered_notes = ", ".join(note.render(output_language) for note in notes)
+    return f"{rendered}: {rendered_notes}"
 
 
 def _required_path(payload: Mapping[str, Any], key: str) -> Path:
@@ -616,6 +759,16 @@ def _optional_int(payload: Mapping[str, Any], key: str, default: int) -> int:
     value = payload.get(key, default)
     if isinstance(value, bool) or not isinstance(value, int):
         msg = f"payload.{key} must be an integer."
+        raise ValueError(msg)
+    return value
+
+
+def _optional_mapping(payload: Mapping[str, Any], key: str) -> Mapping[str, Any] | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        msg = f"payload.{key} must be a mapping when provided."
         raise ValueError(msg)
     return value
 
@@ -678,6 +831,22 @@ def _format_turnover(value: Any) -> str:
 
 def _is_missing(value: Any) -> bool:
     return value is None or bool(pd.isna(value))
+
+
+def _constraint_counts(frame: pd.DataFrame) -> dict[str, int]:
+    counts = {}
+    for column in (
+        "is_trade_eligible",
+        "is_suspended_or_missing",
+        "is_limit_up",
+        "is_limit_down",
+        "is_st",
+        "is_new_stock",
+        "is_delisting_risk",
+    ):
+        if column in frame.columns:
+            counts[column] = int(frame[column].fillna(False).astype(bool).sum())
+    return counts
 
 
 def _markdown_cell(value: Any) -> str:

@@ -1347,14 +1347,15 @@ Implemented in `quant-agent/`:
     -   optional `as_of_date`
     -   `ranking_path`
     -   `ranking_markdown_path`
+    -   `trading_constraints`
     -   `output_language`
 -   ranking date selection uses the latest available factor-score date, or the
     latest date on or before `as_of_date`
 -   ranking score honors factor direction:
     -   `positive`: larger factor score ranks higher
     -   `negative`: smaller factor score ranks higher
--   candidate rows exclude missing factor scores and rows marked
-    `is_suspended_or_missing`
+-   candidate rows exclude missing factor scores and rows failing the configured
+    A-share trading-constraint policy
 -   ranking output fields:
     -   rank
     -   symbol
@@ -1363,6 +1364,8 @@ Implemented in `quant-agent/`:
     -   20-day volatility
     -   20-day drawdown
     -   turnover rate
+    -   A-share constraint flags
+    -   trade eligibility reason
     -   reason text
     -   risk text
 -   artifacts:
@@ -1371,9 +1374,52 @@ Implemented in `quant-agent/`:
 -   the daily research manifest now includes a `ranking` stage and artifact
     paths for both ranking files
 
-The ranking intentionally remains a research-support artifact. A-share trading
-constraints, transaction costs, slippage, and position sizing remain separate P0
-tasks.
+The ranking intentionally remains a research-support artifact. Transaction
+costs, slippage, and position sizing remain separate P0/P2 tasks.
+
+## A-Share Trading Constraints
+
+Implemented in `quant-agent/`:
+
+-   `AshareTradingConstraintSpec` in `agents/ashare_trading_constraints.py`
+-   `apply_ashare_trading_constraints(...)` for reusable row-level flags
+-   supported policy fields:
+    -   `t_plus_one`
+    -   `exclude_suspended`
+    -   `exclude_limit_up`
+    -   `exclude_limit_down`
+    -   `exclude_st`
+    -   `exclude_new_stock`
+    -   `exclude_delisting_risk`
+    -   `new_stock_min_trading_days`
+    -   `limit_price_tolerance`
+-   generated fields:
+    -   previous close
+    -   symbol-specific price-limit threshold
+    -   upper/lower limit prices
+    -   limit-up and limit-down flags
+    -   ST flag
+    -   new-stock flag
+    -   delisting-risk flag
+    -   T+1 flag
+    -   trade eligibility
+    -   machine-readable constraint reason
+
+Default daily ranking behavior:
+
+-   filters suspended or missing rows
+-   filters ST stocks
+-   filters new stocks when listing-age data is available and below the
+    configured threshold
+-   filters delisting-risk stocks
+-   marks limit-up and limit-down rows but does not filter them unless the
+    daily config enables the limit filters
+-   adds T+1 notes to candidate risk text
+
+The module does not fetch separate security master data yet. ST, listing age,
+and delisting-risk detection use columns already present in the input panel when
+available, plus conservative name-based detection for ST and delisting-risk
+labels.
 
 ## Project Output Language
 

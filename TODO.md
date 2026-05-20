@@ -44,12 +44,12 @@ Current status:
   - [x] Add risk text explaining why each stock could fail
   - [x] Save ranking output as CSV and Markdown
 
-- [ ] Add A-share trading constraints
-  - [ ] Handle T+1 assumptions
-  - [ ] Flag limit-up and limit-down rows
-  - [ ] Filter or flag ST stocks
-  - [ ] Handle suspended stocks explicitly in ranking
-  - [ ] Add new-stock and delisting risk filters
+- [x] Add A-share trading constraints
+  - [x] Handle T+1 assumptions
+  - [x] Flag limit-up and limit-down rows
+  - [x] Filter or flag ST stocks
+  - [x] Handle suspended stocks explicitly in ranking
+  - [x] Add new-stock and delisting risk filters
 
 - [ ] Add transaction cost realism
   - [ ] Add commission, stamp duty, transfer fee, and slippage assumptions
@@ -143,8 +143,8 @@ Current status:
 
 Continue P0 daily usability:
 
-1. Generate a practical daily stock ranking output.
-2. Then add A-share trading constraints and transaction cost realism.
+1. Add transaction cost realism.
+2. Then add out-of-sample validation and factor robustness checks.
 
 This is the most direct path from the current offline MVP to useful daily
 self-directed trading research.

@@ -39,6 +39,10 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
                     "template_ids": ["close_to_open_return"],
                     "factor_set_name": "daily_test",
                     "ranking_top_n": 5,
+                    "trading_constraints": {
+                        "exclude_limit_up": True,
+                        "new_stock_min_trading_days": 120,
+                    },
                     "output_language": "zh",
                 }
             }
@@ -54,6 +58,8 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
     assert spec.output_dir == Path("runs")
     assert spec.template_ids == ("close_to_open_return",)
     assert spec.ranking_top_n == 5
+    assert spec.trading_constraints.exclude_limit_up is True
+    assert spec.trading_constraints.new_stock_min_trading_days == 120
     assert spec.output_language == "zh"
 
 

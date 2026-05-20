@@ -1,5 +1,10 @@
 """Agent implementations are added incrementally according to TASKS.md."""
 
+from agents.ashare_trading_constraints import (
+    AshareTradingConstraintResult,
+    AshareTradingConstraintSpec,
+    apply_ashare_trading_constraints,
+)
 from agents.backtest_agent import (
     BacktestAgent,
     BacktestBuildResult,
@@ -135,6 +140,8 @@ __all__ = [
     "AkShareSmokeReport",
     "AkShareSmokeSpec",
     "AkShareTradingCalendarProvider",
+    "AshareTradingConstraintResult",
+    "AshareTradingConstraintSpec",
     "BacktestAgent",
     "BacktestBuildResult",
     "BacktestResultJson",
@@ -201,6 +208,7 @@ __all__ = [
     "SmokeDiagnostic",
     "TradingCalendarProvider",
     "align_to_trading_calendar",
+    "apply_ashare_trading_constraints",
     "apply_rank_transforms",
     "apply_rolling_features",
     "attach_benchmark_tests_to_result_json",

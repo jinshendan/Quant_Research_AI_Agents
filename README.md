@@ -24,7 +24,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 - 作为个人实盘前研究辅助工具
 
 当前项目不适合直接作为自动交易系统，也不能单独作为真实资金买卖决策依据。
-它仍缺少每日候选股排名、A 股交易约束、交易成本、组合管理和实盘风控。
+它仍缺少交易成本、组合管理和实盘风控。
 
 ### 已实现功能
 
@@ -50,6 +50,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | ReportAgent | 已实现 | 生成结构化研究报告和 Markdown 报告 |
 | 中英双语输出 | 已实现 | 报告、Factor Wiki、daily 摘要、AkShare smoke、dashboard 支持 `en` / `zh` / `bilingual` |
 | DailyRankingAgent | 已实现 | 生成每日 Top N 候选股票排名 CSV 和 Markdown |
+| A 股交易约束 | 已实现 | T+1 提示、涨跌停标记、ST/停牌/新股/退市风险过滤或标记 |
 | Streamlit dashboard | 已实现 | 因子排名、指标分布、报告列表 |
 | Factor Explorer | 已实现 | 查看单个因子记录、诊断和关联报告 |
 | Semantic Search UI | 已实现 | dashboard 中搜索历史因子记忆 |
@@ -66,6 +67,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | 保存因子研究记录和 FAISS 索引 |
 | ReportAgent | `quant-agent/agents/report_agent.py` | 生成 Markdown 研究报告 |
+| A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | 统一生成 A 股交易约束标签 |
 | DailyRankingAgent | `quant-agent/agents/daily_ranking.py` | 生成每日候选股票排名 |
 | I18N | `quant-agent/core/i18n.py` | 统一管理中英双语输出标签 |
 | Daily Research | `quant-agent/scripts/run_daily_research.py` | 串联每日研究 pipeline 并输出运行清单 |
@@ -180,6 +182,16 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
   "factor_direction": "positive",
   "quantile_count": 5,
   "ranking_top_n": 10,
+  "trading_constraints": {
+    "t_plus_one": true,
+    "exclude_suspended": true,
+    "exclude_limit_up": false,
+    "exclude_limit_down": false,
+    "exclude_st": true,
+    "exclude_new_stock": true,
+    "exclude_delisting_risk": true,
+    "new_stock_min_trading_days": 60
+  },
   "output_language": "bilingual",
   "factor_metadata": {
     "name": "daily_close_to_open",
@@ -198,8 +210,10 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
 - `output_dir/run_id/daily_stock_ranking.md`
 
 排名包含因子分数、排名、近 5 日收益、20 日波动率、20 日回撤、换手率、
-入选理由和风险提示。当前排名是研究辅助输出，不含 T+1、涨跌停、ST、交易成本等
-实盘约束，这些仍在后续 P0 任务中。
+交易约束、入选理由和风险提示。默认约束会过滤停牌/缺失、ST、新股和退市风险；
+涨跌停默认标记但不过滤，可通过 `trading_constraints.exclude_limit_up` 和
+`trading_constraints.exclude_limit_down` 收紧。当前排名仍是研究辅助输出，不含
+交易成本、滑点和仓位管理。
 
 运行 dashboard：
 
@@ -358,8 +372,6 @@ print(report_response.output["report_path"])
 
 | 优先级 | 计划 |
 | --- | --- |
-| P0 | 生成每日候选股票排名 |
-| P0 | 加入 A 股交易约束：T+1、涨跌停、ST、停牌、新股、退市风险 |
 | P0 | 加入交易成本：佣金、印花税、过户费、滑点和换手惩罚 |
 | P1 | 加入样本外验证、walk-forward validation、因子稳健性检查 |
 | P1 | 加入数据泄漏和幸存者偏差检查 |
@@ -418,6 +430,7 @@ for real-money trading decisions.
 | ReportAgent | Done | Structured draft and Markdown report generation |
 | Bilingual output | Done | Reports, Factor Wiki, daily summaries, AkShare smoke, and dashboard support `en` / `zh` / `bilingual` |
 | DailyRankingAgent | Done | Daily Top N candidate stock ranking as CSV and Markdown |
+| A-share trading constraints | Done | T+1 note, price-limit flags, ST/suspension/new-stock/delisting-risk filters |
 | Streamlit dashboard | Done | Factor ranking, metric distributions, report inventory |
 | Factor Explorer | Done | Single-factor diagnostics and linked reports |
 | Semantic Search UI | Done | Search historical factor memory from the dashboard |
@@ -434,6 +447,7 @@ for real-money trading decisions.
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | Store factor research records and FAISS indexes |
 | ReportAgent | `quant-agent/agents/report_agent.py` | Generate Markdown research reports |
+| A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | Generate reusable A-share trading-constraint flags |
 | DailyRankingAgent | `quant-agent/agents/daily_ranking.py` | Generate daily candidate stock rankings |
 | I18N | `quant-agent/core/i18n.py` | Shared bilingual output labels |
 | Daily Research | `quant-agent/scripts/run_daily_research.py` | Run the daily pipeline and write a run manifest |
@@ -520,6 +534,16 @@ Minimal JSON config:
   "factor_direction": "positive",
   "quantile_count": 5,
   "ranking_top_n": 10,
+  "trading_constraints": {
+    "t_plus_one": true,
+    "exclude_suspended": true,
+    "exclude_limit_up": false,
+    "exclude_limit_down": false,
+    "exclude_st": true,
+    "exclude_new_stock": true,
+    "exclude_delisting_risk": true,
+    "new_stock_min_trading_days": 60
+  },
   "output_language": "bilingual",
   "factor_metadata": {
     "name": "daily_close_to_open",
@@ -539,9 +563,13 @@ It also writes:
 - `output_dir/run_id/daily_stock_ranking.md`
 
 The ranking includes factor score, rank, recent 5-day return, 20-day volatility,
-20-day drawdown, turnover, reason text, and risk text. It is research support
-only; T+1, price-limit, ST, suspension, cost, and slippage constraints are still
-separate P0 roadmap items.
+20-day drawdown, turnover, trading-constraint status, reason text, and risk
+text. By default it filters suspended/missing rows, ST stocks, new stocks, and
+delisting-risk stocks. Limit-up and limit-down rows are flagged but not filtered
+unless `trading_constraints.exclude_limit_up` or
+`trading_constraints.exclude_limit_down` is enabled. It is still research
+support only; transaction costs, slippage, and position sizing are separate
+roadmap items.
 
 Run tests and checks:
 
@@ -647,9 +675,6 @@ print(response.output["benchmark_status"])
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- generate practical daily stock ranking output
-- add A-share trading constraints such as T+1, limit up/down, ST, suspension,
-  new-stock, and delisting-risk handling
 - add realistic transaction costs and slippage
 - add out-of-sample and walk-forward validation
 - add factor robustness, leakage, and survivorship-bias checks

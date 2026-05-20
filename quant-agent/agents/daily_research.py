@@ -10,6 +10,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from agents.ashare_trading_constraints import AshareTradingConstraintSpec
 from agents.backtest_agent import BacktestAgent, default_benchmark_thresholds
 from agents.data_agent import DataAgent
 from agents.daily_ranking import (
@@ -93,6 +94,9 @@ class DailyResearchSpec:
     factor_metadata: dict[str, Any] = field(default_factory=dict)
     preview_rows: int = DEFAULT_DAILY_PREVIEW_ROWS
     ranking_top_n: int = DEFAULT_RANKING_TOP_N
+    trading_constraints: AshareTradingConstraintSpec = field(
+        default_factory=AshareTradingConstraintSpec,
+    )
     output_language: OutputLanguage = DEFAULT_OUTPUT_LANGUAGE
 
     def __post_init__(self) -> None:
@@ -193,6 +197,9 @@ class DailyResearchSpec:
                 minimum=1,
                 maximum=200,
             ),
+            trading_constraints=AshareTradingConstraintSpec.from_mapping(
+                _optional_mapping(raw, "trading_constraints"),
+            ),
             output_language=_optional_output_language(raw),
         )
 
@@ -239,6 +246,7 @@ class DailyResearchSpec:
             "factor_metadata": dict(self.factor_metadata),
             "preview_rows": self.preview_rows,
             "ranking_top_n": self.ranking_top_n,
+            "trading_constraints": self.trading_constraints.to_dict(),
             "output_language": self.output_language,
         }
 
@@ -371,6 +379,7 @@ def run_daily_research(
                     "top_n": spec.ranking_top_n,
                     "ranking_path": str(ranking_path),
                     "ranking_markdown_path": str(ranking_markdown_path),
+                    "trading_constraints": spec.trading_constraints.to_dict(),
                     "output_language": spec.output_language,
                 },
                 task_id=f"{run_id}-ranking",

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from agents.ashare_trading_constraints import AshareTradingConstraintSpec
 from agents.daily_ranking import (
     DailyRankingAgent,
     DailyRankingSpec,
@@ -57,11 +58,13 @@ def test_daily_ranking_agent_writes_csv_and_markdown(tmp_path: Path) -> None:
     assert ranking["symbol"].astype(str).str.zfill(6).tolist() == ["000004", "000003"]
     assert "reason" in ranking.columns
     assert "risk" in ranking.columns
+    assert "trade_constraint_reason" in ranking.columns
 
     markdown = markdown_path.read_text(encoding="utf-8")
     assert markdown.startswith("# 每日候选股票排名 / Daily Stock Ranking")
     assert "000004" in markdown
     assert "入选理由 / Reason" in markdown
+    assert "交易约束 / Trading constraints" in markdown
 
 
 def test_build_daily_stock_ranking_supports_negative_direction() -> None:
@@ -118,6 +121,54 @@ def test_daily_ranking_agent_rejects_missing_factor_column(tmp_path: Path) -> No
     assert "factor__alpha" in str(response.error)
 
 
+def test_daily_ranking_filters_default_ashare_hard_constraints() -> None:
+    spec = DailyRankingSpec(
+        factor_matrix_path=Path("factors.csv"),
+        aligned_data_path=Path("aligned.csv"),
+        factor_column="factor__alpha",
+        top_n=3,
+        output_language="en",
+    )
+
+    result = build_daily_stock_ranking(
+        _constraint_factor_matrix(),
+        _constraint_aligned_data(),
+        spec=spec,
+    )
+
+    assert result.data["symbol"].tolist() == ["000006", "000001"]
+    assert bool(result.data.loc[0, "is_limit_up"])
+    assert bool(result.data.loc[0, "is_trade_eligible"])
+    assert str(result.data.loc[0, "trade_constraint_reason"]).startswith(
+        "eligible_with_flags: limit_up"
+    )
+    assert result.stats["excluded_symbol_count"] == 4
+    assert result.stats["ranking_date_constraint_counts"]["is_limit_up"] == 1
+    assert result.stats["ranking_date_constraint_counts"]["is_st"] == 1
+    assert result.stats["ranking_date_constraint_counts"]["is_new_stock"] == 1
+    assert result.stats["ranking_date_constraint_counts"]["is_delisting_risk"] == 1
+
+
+def test_daily_ranking_can_exclude_limit_up_with_trading_constraints() -> None:
+    spec = DailyRankingSpec(
+        factor_matrix_path=Path("factors.csv"),
+        aligned_data_path=Path("aligned.csv"),
+        factor_column="factor__alpha",
+        top_n=3,
+        trading_constraints=AshareTradingConstraintSpec(exclude_limit_up=True),
+        output_language="en",
+    )
+
+    result = build_daily_stock_ranking(
+        _constraint_factor_matrix(),
+        _constraint_aligned_data(),
+        spec=spec,
+    )
+
+    assert result.data["symbol"].tolist() == ["000001"]
+    assert result.stats["excluded_symbol_count"] == 5
+
+
 def _factor_matrix() -> pd.DataFrame:
     dates = _dates()
     latest_scores = {
@@ -166,3 +217,70 @@ def _aligned_data() -> pd.DataFrame:
 def _dates() -> list[date]:
     start = date(2024, 1, 1)
     return [start + timedelta(days=day) for day in range(8)]
+
+
+def _constraint_factor_matrix() -> pd.DataFrame:
+    dates = [date(2024, 1, 1), date(2024, 1, 2)]
+    latest_scores = {
+        "000001": 0.40,
+        "000002": 0.90,
+        "000003": 0.80,
+        "000004": 0.70,
+        "000005": 0.60,
+        "000006": 0.50,
+    }
+    rows = []
+    for day_index, current_date in enumerate(dates):
+        for symbol, latest_score in latest_scores.items():
+            rows.append(
+                {
+                    "date": current_date.isoformat(),
+                    "symbol": symbol,
+                    "factor__alpha": latest_score + day_index * 0.001,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _constraint_aligned_data() -> pd.DataFrame:
+    rows = []
+    names = {
+        "000001": "normal",
+        "000002": "ST sample",
+        "000003": "normal",
+        "000004": "退市风险",
+        "000005": "normal",
+        "000006": "normal",
+    }
+    trading_days = {
+        "000001": 200,
+        "000002": 200,
+        "000003": 10,
+        "000004": 200,
+        "000005": 200,
+        "000006": 200,
+    }
+    latest_close = {
+        "000001": 10.1,
+        "000002": 10.2,
+        "000003": 10.3,
+        "000004": 10.4,
+        "000005": 10.5,
+        "000006": 11.0,
+    }
+    for current_date in (date(2024, 1, 1), date(2024, 1, 2)):
+        for symbol in names:
+            rows.append(
+                {
+                    "date": current_date.isoformat(),
+                    "symbol": symbol,
+                    "close": 10.0 if current_date == date(2024, 1, 1) else latest_close[symbol],
+                    "turnover_rate": 1.0,
+                    "stock_name": names[symbol],
+                    "trading_days_since_listing": trading_days[symbol],
+                    "is_suspended_or_missing": (
+                        symbol == "000005" and current_date == date(2024, 1, 2)
+                    ),
+                }
+            )
+    return pd.DataFrame(rows)
