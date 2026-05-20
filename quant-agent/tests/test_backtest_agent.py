@@ -128,7 +128,11 @@ def test_backtest_spec_accepts_manifest_only(tmp_path: Path) -> None:
     assert spec.transaction_costs.enabled is True
     assert spec.transaction_costs.profile_name == "a_share_retail_default"
     assert spec.benchmark_thresholds["min_usable_rows"] == 10
+    assert spec.benchmark_thresholds["min_portfolio_dates"] == 60
+    assert spec.benchmark_thresholds["min_average_leg_count"] == 3
+    assert spec.benchmark_thresholds["min_mean_rank_ic"] == 0.02
     assert spec.benchmark_thresholds["min_sharpe"] == 1.0
+    assert spec.benchmark_thresholds["min_total_return"] == 0.0
     assert spec.benchmark_thresholds["max_drawdown_abs"] == 0.2
     assert spec.benchmark_thresholds["min_mean_ic"] is None
     assert spec.preview_rows == 0
@@ -201,6 +205,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
                     "min_portfolio_dates": 2,
                     "min_ic_dates": 2,
                     "min_rank_ic_dates": 2,
+                    "min_average_leg_count": 2,
                     "min_mean_ic": 0.9,
                     "min_mean_rank_ic": 0.9,
                     "min_sharpe": 1.0,
@@ -266,6 +271,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert stats["valid_factor_row_count"] == 12
     assert stats["valid_forward_return_row_count"] == 12
     assert stats["skipped_date_count"] == 0
+    assert stats["average_leg_count"] == pytest.approx(2.0)
     assert stats["average_turnover"] == pytest.approx(1.0)
     assert stats["average_transaction_cost"] == pytest.approx(0.00081)
     assert response.output["cost_stats"]["total_transaction_cost"] == pytest.approx(
@@ -323,9 +329,10 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     benchmark_tests = response.output["benchmark_tests"]
     assert response.output["benchmark_status"] == "passed"
     assert benchmark_tests["status"] == "passed"
-    assert benchmark_tests["test_count"] == 9
-    assert benchmark_tests["passed_count"] == 9
+    assert benchmark_tests["test_count"] == 10
+    assert benchmark_tests["passed_count"] == 10
     assert benchmark_tests["failed_count"] == 0
+    assert benchmark_tests["failed_tests"] == []
     result_json = response.output["result_json"]
     assert result_json["schema_version"] == 1
     assert result_json["state"] == "backtest_benchmark_tested"
@@ -377,7 +384,14 @@ def test_backtest_agent_uses_single_factor_without_explicit_column(
 
     assert response.status == "success"
     assert response.output["factor_column"] == "factor__alpha"
-    assert response.output["benchmark_status"] == "passed"
+    assert response.output["benchmark_status"] == "failed"
+    assert set(response.output["benchmark_tests"]["failed_tests"]) == {
+        "usable_row_count",
+        "portfolio_date_count",
+        "ic_date_count",
+        "rank_ic_date_count",
+        "average_leg_count",
+    }
     assert response.output["result_json_path"] is None
     assert response.output["preview"] == []
 
@@ -657,6 +671,7 @@ def test_run_benchmark_tests_reports_failures() -> None:
             "portfolio_date_count": 2,
             "ic_date_count": 2,
             "rank_ic_date_count": 2,
+            "average_leg_count": 2,
             "mean_ic": 0.04,
             "mean_rank_ic": 0.03,
             "sharpe": 0.8,
@@ -672,6 +687,7 @@ def test_run_benchmark_tests_reports_failures() -> None:
             "min_portfolio_dates": 2,
             "min_ic_dates": 2,
             "min_rank_ic_dates": 2,
+            "min_average_leg_count": 3,
             "min_mean_ic": 0.05,
             "min_mean_rank_ic": 0.05,
             "min_sharpe": 1.0,
@@ -681,14 +697,24 @@ def test_run_benchmark_tests_reports_failures() -> None:
     )
 
     assert benchmark_tests["status"] == "failed"
-    assert benchmark_tests["test_count"] == 9
+    assert benchmark_tests["test_count"] == 10
     assert benchmark_tests["passed_count"] == 3
-    assert benchmark_tests["failed_count"] == 6
+    assert benchmark_tests["failed_count"] == 7
+    assert benchmark_tests["failed_tests"] == [
+        "usable_row_count",
+        "average_leg_count",
+        "mean_ic",
+        "mean_rank_ic",
+        "sharpe",
+        "total_return",
+        "max_drawdown_abs",
+    ]
     failed_names = {
         test["name"] for test in benchmark_tests["tests"] if not test["passed"]
     }
     assert failed_names == {
         "usable_row_count",
+        "average_leg_count",
         "mean_ic",
         "mean_rank_ic",
         "sharpe",

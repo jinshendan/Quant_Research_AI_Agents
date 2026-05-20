@@ -170,6 +170,7 @@ def test_end_to_end_research_pipeline_writes_artifacts_and_powers_dashboard(
                     "min_portfolio_dates": 3,
                     "min_ic_dates": 3,
                     "min_rank_ic_dates": 3,
+                    "min_average_leg_count": 2,
                     "min_mean_ic": 0.9,
                     "min_mean_rank_ic": 0.9,
                     "min_total_return": 0.01,

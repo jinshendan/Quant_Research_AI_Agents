@@ -879,10 +879,10 @@ Implemented in `quant-agent/`:
 
 -   optional `payload.benchmark_thresholds` in
     `quant-agent/agents/backtest_agent.py`
--   default structural benchmark thresholds for usable rows, portfolio dates,
-    IC dates, and RankIC dates
--   optional metric thresholds for mean IC, mean RankIC, Sharpe, total return,
-    and absolute max drawdown
+-   default quality benchmark thresholds for usable rows, portfolio dates,
+    IC dates, RankIC dates, average leg count, mean RankIC, net Sharpe, net
+    total return, and absolute max drawdown
+-   optional metric threshold for mean IC
 -   `run_benchmark_tests(...)` for deterministic checks against the Day 20
     result JSON
 -   `attach_benchmark_tests_to_result_json(...)` for embedding benchmark
@@ -907,6 +907,7 @@ status
 test_count
 passed_count
 failed_count
+failed_tests
 thresholds
 tests
 ```
@@ -916,6 +917,23 @@ operator, threshold, actual value, and boolean pass/fail status. Running
 benchmark tests does not turn the agent response into an error when a factor
 fails a threshold; the benchmark status is data that downstream agents can use
 for ranking, memory storage, and reporting.
+
+Current default thresholds are intentionally stricter than the initial MVP:
+
+```text
+min_usable_rows = 252
+min_portfolio_dates = 60
+min_ic_dates = 60
+min_rank_ic_dates = 60
+min_average_leg_count = 3
+min_mean_rank_ic = 0.02
+min_sharpe = 0.5
+min_total_return = 0.0
+max_drawdown_abs = 0.35
+```
+
+Callers can still override any threshold with `payload.benchmark_thresholds`;
+setting a metric threshold to `null` disables that check.
 
 After Day 21, successful BacktestAgent responses use:
 
@@ -1334,7 +1352,7 @@ Implemented in `quant-agent/`:
 -   `daily_research_manifest.json` with schema version, stage summaries,
     artifact paths, request echo, elapsed time, status, and error details
 -   terminal summary with run status, manifest path, factor column, benchmark
-    status, memory ID, ranking paths, and report path
+    status, failed benchmark tests, memory ID, ranking paths, and report path
 -   offline tests for config loading, success manifest generation, and error
     manifest generation
 

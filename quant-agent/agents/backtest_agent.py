@@ -63,15 +63,16 @@ MIN_ANNUALIZATION_FACTOR = 1
 MAX_ANNUALIZATION_FACTOR = 366
 SUPPORTED_FACTOR_DIRECTIONS = {"positive", "negative"}
 DEFAULT_BENCHMARK_THRESHOLDS: dict[str, BenchmarkThresholdValue] = {
-    "min_usable_rows": 1,
-    "min_portfolio_dates": 1,
-    "min_ic_dates": 1,
-    "min_rank_ic_dates": 1,
+    "min_usable_rows": 252,
+    "min_portfolio_dates": 60,
+    "min_ic_dates": 60,
+    "min_rank_ic_dates": 60,
+    "min_average_leg_count": 3,
     "min_mean_ic": None,
-    "min_mean_rank_ic": None,
-    "min_sharpe": None,
-    "min_total_return": None,
-    "max_drawdown_abs": None,
+    "min_mean_rank_ic": 0.02,
+    "min_sharpe": 0.5,
+    "min_total_return": 0.0,
+    "max_drawdown_abs": 0.35,
 }
 BENCHMARK_TEST_DEFINITIONS = (
     ("min_usable_rows", "usable_row_count", "summary.usable_row_count", ">="),
@@ -86,6 +87,12 @@ BENCHMARK_TEST_DEFINITIONS = (
         "min_rank_ic_dates",
         "rank_ic_date_count",
         "summary.rank_ic_date_count",
+        ">=",
+    ),
+    (
+        "min_average_leg_count",
+        "average_leg_count",
+        "summary.average_leg_count",
         ">=",
     ),
     ("min_mean_ic", "mean_ic", "summary.mean_ic", ">="),
@@ -1360,6 +1367,7 @@ def generate_backtest_result_json(
             "portfolio_date_count": len(backtest_result.portfolio_returns),
             "ic_date_count": ic_result.stats["ic_date_count"],
             "rank_ic_date_count": rank_ic_result.stats["rank_ic_date_count"],
+            "average_leg_count": backtest_result.stats["average_leg_count"],
             "mean_ic": ic_result.stats["mean_ic"],
             "mean_rank_ic": rank_ic_result.stats["mean_rank_ic"],
             "sharpe": sharpe_result.stats["sharpe"],
@@ -1454,12 +1462,14 @@ def run_benchmark_tests(
 
     passed_count = sum(1 for test in tests if test["passed"])
     failed_count = len(tests) - passed_count
+    failed_tests = [str(test["name"]) for test in tests if not test["passed"]]
     document = {
         "schema_version": 1,
         "status": "passed" if failed_count == 0 else "failed",
         "test_count": len(tests),
         "passed_count": passed_count,
         "failed_count": failed_count,
+        "failed_tests": failed_tests,
         "thresholds": normalized_thresholds,
         "tests": tests,
     }
@@ -1534,6 +1544,7 @@ def _backtest_stats(
         "skipped_date_count": portfolio_result.stats["skipped_date_count"],
         "average_long_count": average_long_count,
         "average_short_count": average_short_count,
+        "average_leg_count": min(average_long_count, average_short_count),
         "transaction_costs": cost_stats,
         "average_turnover": cost_stats["average_turnover"],
         "average_transaction_cost": cost_stats["average_transaction_cost"],

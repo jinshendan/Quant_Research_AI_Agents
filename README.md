@@ -44,7 +44,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | FactorGenerationAgent | 已实现 | 生成 50 个确定性候选因子 |
 | BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
 | 交易成本模型 | 已实现 | 佣金、印花税、过户费、滑点、换手率、gross/net 指标 |
-| Benchmark tests | 已实现 | 对回测结果做确定性质量门槛检查 |
+| Benchmark tests | 已实现 | 对回测结果做确定性质量门槛检查，默认检查样本数、RankIC、净夏普、净收益、回撤和分组股票数 |
 | MemoryAgent | 已实现 | 保存因子研究记录到 JSONL |
 | FAISS 语义检索 | 已实现 | 对因子记忆做本地向量索引和搜索 |
 | Factor wiki | 已实现 | 自动生成因子知识库 Markdown |
@@ -391,7 +391,7 @@ print(report_response.output["report_path"])
 
 | 优先级 | 计划 |
 | --- | --- |
-| P0 | 收紧默认回测质量门槛，减少“指标差但通过”的误判 |
+| P0 | 构建 CriticAgent，解释低质量因子和失败 benchmark |
 | P1 | 加入样本外验证、walk-forward validation、因子稳健性检查 |
 | P1 | 加入数据泄漏和幸存者偏差检查 |
 | P2 | 构建 CriticAgent、PortfolioAgent、ExperimentAgent |
@@ -443,7 +443,7 @@ for real-money trading decisions.
 | FactorGenerationAgent | Done | 50 deterministic candidate factors |
 | BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
 | Transaction cost model | Done | Commission, stamp duty, transfer fee, slippage, turnover, gross/net metrics |
-| Benchmark tests | Done | Deterministic gates over backtest results |
+| Benchmark tests | Done | Deterministic gates over sample size, RankIC, net Sharpe, net return, drawdown, and average leg count |
 | MemoryAgent | Done | JSONL factor research memory |
 | FAISS search | Done | Local semantic search over factor memory |
 | Factor wiki | Done | Markdown factor knowledge base |
@@ -685,6 +685,7 @@ response = BacktestAgent().run(
     )
 )
 print(response.output["benchmark_status"])
+print(response.output["benchmark_tests"]["failed_tests"])
 print(response.output["cost_stats"])
 ```
 
@@ -713,7 +714,7 @@ print(response.output["cost_stats"])
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- tighten default backtest quality gates
+- build CriticAgent for low-quality factor review
 - add out-of-sample and walk-forward validation
 - add factor robustness, leakage, and survivorship-bias checks
 - build CriticAgent, PortfolioAgent, and ExperimentAgent

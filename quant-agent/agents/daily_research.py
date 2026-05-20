@@ -50,6 +50,10 @@ SUMMARY_LABELS = {
     "failed_symbols": LocalizedText(en="failed_symbols", zh="失败股票代码"),
     "factor_column": LocalizedText(en="factor_column", zh="因子列"),
     "benchmark_status": LocalizedText(en="benchmark_status", zh="基准状态"),
+    "failed_benchmark_tests": LocalizedText(
+        en="failed_benchmark_tests",
+        zh="失败基准项",
+    ),
     "memory_id": LocalizedText(en="memory_id", zh="记忆 ID"),
     "top_ranked_symbols": LocalizedText(en="top_ranked_symbols", zh="排名靠前股票"),
     "ranking_path": LocalizedText(en="ranking_path", zh="排名 CSV 路径"),
@@ -508,6 +512,7 @@ def format_daily_research_summary(
         "failed_symbols",
         "factor_column",
         "benchmark_status",
+        "failed_benchmark_tests",
         "memory_id",
         "top_ranked_symbols",
         "ranking_path",
@@ -672,6 +677,9 @@ def _backtest_stage(response: AgentResponse) -> dict[str, Any]:
         "summary": {
             "factor_column": output.get("factor_column"),
             "benchmark_status": output.get("benchmark_status"),
+            "failed_benchmark_tests": _failed_benchmark_tests(
+                output.get("benchmark_tests"),
+            ),
             "usable_row_count": output.get("usable_row_count"),
             "portfolio_date_count": output.get("portfolio_date_count"),
             "ic_stats": output.get("ic_stats"),
@@ -763,6 +771,7 @@ def _summary(
         "factor_columns": feature.get("factor_columns"),
         "factor_column": backtest.get("factor_column"),
         "benchmark_status": backtest.get("benchmark_status"),
+        "failed_benchmark_tests": backtest.get("failed_benchmark_tests"),
         "memory_id": memory.get("memory_id"),
         "top_ranked_symbols": ranking.get("top_symbols"),
         "ranking_path": ranking_artifacts.get("ranking_path"),
@@ -870,6 +879,25 @@ def _stage_artifacts(
         return {}
     artifacts = stage.get("artifacts")
     return artifacts if isinstance(artifacts, Mapping) else {}
+
+
+def _failed_benchmark_tests(value: Any) -> list[str]:
+    if not isinstance(value, Mapping):
+        return []
+    raw_failed_tests = value.get("failed_tests")
+    if isinstance(raw_failed_tests, list):
+        return [str(item) for item in raw_failed_tests if str(item).strip()]
+
+    raw_tests = value.get("tests")
+    if not isinstance(raw_tests, list):
+        return []
+    failed = []
+    for item in raw_tests:
+        if isinstance(item, Mapping) and item.get("passed") is False:
+            name = item.get("name")
+            if name is not None:
+                failed.append(str(name))
+    return failed
 
 
 def _payload_section(payload: Mapping[str, Any]) -> Mapping[str, Any]:
