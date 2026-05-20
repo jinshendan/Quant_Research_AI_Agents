@@ -55,10 +55,17 @@ def _memory_record(
             "ic": 0.04,
             "rank_ic": 0.05,
             "sharpe": 1.2 if benchmark_status == "passed" else 0.2,
+            "gross_sharpe": 1.4 if benchmark_status == "passed" else 0.4,
+            "net_sharpe": 1.2 if benchmark_status == "passed" else 0.2,
             "max_drawdown": -0.1,
             "max_drawdown_abs": 0.1,
             "total_return": 0.2,
+            "gross_total_return": 0.24,
+            "net_total_return": 0.2,
             "turnover": 0.18,
+            "average_turnover": 0.18,
+            "average_transaction_cost": 0.0007,
+            "total_transaction_cost": 0.014,
         },
         "benchmark": {
             "status": benchmark_status,
@@ -76,6 +83,16 @@ def _memory_record(
             "market_condition": "short_horizon_cross_section",
             "related_factors": ["momentum", "return_5d"],
             "paper_reference": "internal-note",
+            "transaction_costs": {
+                "enabled": True,
+                "profile_name": "unit_test_costs",
+                "buy_cost_rate": 0.00081,
+                "sell_cost_rate": 0.00131,
+            },
+            "transaction_cost_stats": {
+                "average_turnover": 0.18,
+                "total_transaction_cost": 0.014,
+            },
         },
         "artifacts": {
             "result_json_path": "/tmp/result.json",
@@ -174,6 +191,8 @@ def test_report_agent_generates_markdown_report_from_memory_path(
     assert report_path.read_text(encoding="utf-8") == markdown_report
     assert markdown_report.startswith("# Research Report: alpha_momentum\n")
     assert "## Backtest Results" in markdown_report
+    assert "- Net Sharpe: 1.2" in markdown_report
+    assert "- Total transaction cost: 0.014" in markdown_report
     assert "- Benchmark status: passed" in markdown_report
     assert "ReportAgent | build_report_draft | success" in stream.getvalue()
     assert "ReportAgent | generate_markdown_report | success" in stream.getvalue()
@@ -218,6 +237,8 @@ def test_report_agent_generates_bilingual_markdown_report(tmp_path: Path) -> Non
     assert response.output["report_title"] == "研究报告：alpha_momentum / Research Report: alpha_momentum"
     assert "# 研究报告：alpha_momentum / Research Report: alpha_momentum" in markdown_report
     assert "## 研究假设 / Hypothesis" in markdown_report
+    assert "- 扣成本后夏普 / Net Sharpe: 1.2" in markdown_report
+    assert "- 累计交易成本 / Total transaction cost: 0.014" in markdown_report
     assert "- 基准状态 / Benchmark status: 通过 / passed" in markdown_report
 
 

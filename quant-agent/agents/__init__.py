@@ -134,6 +134,13 @@ from agents.trading_calendar import (
     TradingCalendarProvider,
     align_to_trading_calendar,
 )
+from agents.transaction_costs import (
+    TransactionCostSpec,
+    TurnoverBreakdown,
+    compute_turnover,
+    equal_weight_positions,
+    estimate_transaction_cost,
+)
 
 __all__ = [
     "AkShareMarketDataProvider",
@@ -207,6 +214,8 @@ __all__ = [
     "SharpeResult",
     "SmokeDiagnostic",
     "TradingCalendarProvider",
+    "TransactionCostSpec",
+    "TurnoverBreakdown",
     "align_to_trading_calendar",
     "apply_ashare_trading_constraints",
     "apply_rank_transforms",
@@ -221,6 +230,9 @@ __all__ = [
     "compute_information_coefficient",
     "compute_rank_information_coefficient",
     "compute_sharpe_ratio",
+    "compute_turnover",
+    "equal_weight_positions",
+    "estimate_transaction_cost",
     "generate_backtest_result_json",
     "format_daily_research_summary",
     "load_daily_research_config",

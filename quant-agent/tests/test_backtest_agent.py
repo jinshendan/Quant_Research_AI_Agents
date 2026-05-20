@@ -125,11 +125,29 @@ def test_backtest_spec_accepts_manifest_only(tmp_path: Path) -> None:
     assert spec.forward_return_days == 2
     assert spec.quantile_count == 3
     assert spec.annualization_factor == 252
+    assert spec.transaction_costs.enabled is True
+    assert spec.transaction_costs.profile_name == "a_share_retail_default"
     assert spec.benchmark_thresholds["min_usable_rows"] == 10
     assert spec.benchmark_thresholds["min_sharpe"] == 1.0
     assert spec.benchmark_thresholds["max_drawdown_abs"] == 0.2
     assert spec.benchmark_thresholds["min_mean_ic"] is None
     assert spec.preview_rows == 0
+
+
+def test_backtest_spec_accepts_cost_profile_alias(tmp_path: Path) -> None:
+    spec = BacktestSpec.from_payload(
+        {
+            "factor_manifest_path": str(tmp_path / "factor_matrix.manifest.json"),
+            "cost_profile": {
+                "enabled": False,
+                "profile_name": "disabled_costs",
+            },
+        }
+    )
+
+    assert spec.transaction_costs.enabled is False
+    assert spec.transaction_costs.profile_name == "disabled_costs"
+    assert spec.transaction_costs.buy_cost_rate == 0.0
 
 
 def test_backtest_spec_rejects_missing_factor_source() -> None:
@@ -221,7 +239,7 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.metadata["rank_ic_date_count"] == 2
     assert response.metadata["mean_ic"] > 0.99
     assert response.metadata["mean_rank_ic"] == pytest.approx(1.0)
-    assert response.metadata["sharpe"] == pytest.approx(33.67491648096547)
+    assert response.metadata["sharpe"] == pytest.approx(34.42665087119779)
     assert response.metadata["max_drawdown"] == pytest.approx(0.0)
     assert response.metadata["benchmark_status"] == "passed"
     assert response.metadata["result_json_path"] == str(
@@ -233,15 +251,26 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert preview[0]["long_return"] == pytest.approx(0.05)
     assert preview[0]["short_return"] == pytest.approx(-0.05)
     assert preview[0]["long_short_return"] == pytest.approx(0.10)
+    assert preview[0]["net_long_return"] == pytest.approx(0.04919)
+    assert preview[0]["net_long_short_return"] == pytest.approx(0.09838)
+    assert preview[0]["transaction_cost"] == pytest.approx(0.00162)
+    assert preview[0]["turnover"] == pytest.approx(2.0)
     assert preview[0]["long_count"] == 2
     assert preview[0]["short_count"] == 2
     assert preview[1]["long_short_return"] == pytest.approx(0.05)
+    assert preview[1]["net_long_short_return"] == pytest.approx(0.05)
+    assert preview[1]["transaction_cost"] == pytest.approx(0.0)
 
     stats = response.output["backtest_stats"]
     assert stats["input_row_count"] == 12
     assert stats["valid_factor_row_count"] == 12
     assert stats["valid_forward_return_row_count"] == 12
     assert stats["skipped_date_count"] == 0
+    assert stats["average_turnover"] == pytest.approx(1.0)
+    assert stats["average_transaction_cost"] == pytest.approx(0.00081)
+    assert response.output["cost_stats"]["total_transaction_cost"] == pytest.approx(
+        0.00162
+    )
     ic_preview = response.output["ic_series_preview"]
     assert ic_preview[0]["date"] == "2024-01-01"
     assert ic_preview[0]["ic"] > 0.99
@@ -261,26 +290,34 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert response.output["rank_ic_stats"]["mean_rank_ic"] == pytest.approx(1.0)
     assert response.output["rank_ic_stats"]["positive_rank_ic_ratio"] == 1.0
     assert response.output["sharpe_stats"]["method"] == "mean_std"
-    assert response.output["sharpe_stats"]["return_column"] == "long_short_return"
+    assert response.output["sharpe_stats"]["return_column"] == "net_long_short_return"
     assert response.output["sharpe_stats"]["return_count"] == 2
-    assert response.output["sharpe_stats"]["mean_period_return"] == pytest.approx(0.075)
-    assert response.output["sharpe_stats"]["std_period_return"] == pytest.approx(
-        0.03535533905932738
+    assert response.output["sharpe_stats"]["mean_period_return"] == pytest.approx(
+        0.07419
     )
-    assert response.output["sharpe_stats"]["annualized_mean_return"] == pytest.approx(18.9)
+    assert response.output["sharpe_stats"]["std_period_return"] == pytest.approx(
+        0.034209826073805245
+    )
+    assert response.output["sharpe_stats"]["annualized_mean_return"] == pytest.approx(
+        18.69588
+    )
     assert response.output["sharpe_stats"]["sharpe"] == pytest.approx(
+        34.42665087119779
+    )
+    assert response.output["gross_sharpe_stats"]["return_column"] == "long_short_return"
+    assert response.output["gross_sharpe_stats"]["sharpe"] == pytest.approx(
         33.67491648096547
     )
     assert response.output["sharpe_stats"]["positive_return_ratio"] == 1.0
     drawdown_preview = response.output["drawdown_curve_preview"]
     assert drawdown_preview[0]["date"] == "2024-01-01"
-    assert drawdown_preview[0]["equity_curve"] == pytest.approx(1.1)
+    assert drawdown_preview[0]["equity_curve"] == pytest.approx(1.09838)
     assert drawdown_preview[0]["drawdown"] == pytest.approx(0.0)
     assert response.output["drawdown_stats"]["method"] == "cumulative_return"
-    assert response.output["drawdown_stats"]["return_column"] == "long_short_return"
+    assert response.output["drawdown_stats"]["return_column"] == "net_long_short_return"
     assert response.output["drawdown_stats"]["return_count"] == 2
-    assert response.output["drawdown_stats"]["end_equity"] == pytest.approx(1.155)
-    assert response.output["drawdown_stats"]["total_return"] == pytest.approx(0.155)
+    assert response.output["drawdown_stats"]["end_equity"] == pytest.approx(1.153299)
+    assert response.output["drawdown_stats"]["total_return"] == pytest.approx(0.153299)
     assert response.output["drawdown_stats"]["max_drawdown"] == pytest.approx(0.0)
     assert response.output["drawdown_stats"]["drawdown_period_count"] == 0
     benchmark_tests = response.output["benchmark_tests"]
@@ -295,9 +332,16 @@ def test_backtest_agent_builds_long_short_returns_from_manifest(tmp_path: Path) 
     assert result_json["task_id"] == "backtest-task-1"
     assert result_json["inputs"]["factor_column"] == "factor__alpha"
     assert result_json["summary"]["mean_rank_ic"] == pytest.approx(1.0)
-    assert result_json["summary"]["sharpe"] == pytest.approx(33.67491648096547)
+    assert result_json["summary"]["sharpe"] == pytest.approx(34.42665087119779)
+    assert result_json["summary"]["net_sharpe"] == pytest.approx(34.42665087119779)
+    assert result_json["summary"]["gross_sharpe"] == pytest.approx(33.67491648096547)
     assert result_json["summary"]["max_drawdown"] == pytest.approx(0.0)
+    assert result_json["summary"]["net_total_return"] == pytest.approx(0.153299)
+    assert result_json["summary"]["gross_total_return"] == pytest.approx(0.155)
+    assert result_json["summary"]["total_transaction_cost"] == pytest.approx(0.00162)
     assert result_json["metrics"]["drawdown"] == response.output["drawdown_stats"]
+    assert result_json["metrics"]["gross_drawdown"] == response.output["gross_drawdown_stats"]
+    assert result_json["metrics"]["transaction_costs"] == response.output["cost_stats"]
     assert result_json["previews"]["portfolio_returns"] == response.output["preview"]
     assert result_json["benchmark_tests"] == benchmark_tests
     assert result_json["next_action"] == "Build MemoryAgent in Day 22."

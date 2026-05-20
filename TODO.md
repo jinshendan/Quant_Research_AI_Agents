@@ -1,150 +1,207 @@
-# TODO --- Self-Use Trading Research Roadmap
+# TODO --- 自用 A 股量化研究路线图
 
-This TODO is focused on using the agent system as a personal A-share quant
-research assistant. It is not a product roadmap.
+本 TODO 面向个人自用场景：用 Agent 系统辅助 A 股量化因子挖掘、候选股筛选、
+入场/卖出时机研究、复盘和风险检查。它不是产品化路线图，也不是自动交易路线图。
 
-Current status:
+## 当前定位
 
-- The offline research MVP is usable for learning, factor experiments,
-  backtests, memory, reports, dashboard review, and semantic search.
-- It is not ready to be used as the sole basis for real-money trading decisions.
-- The next phase should prioritize reliable live data, realistic A-share
-  constraints, and daily decision support.
-- Human-facing output now supports `bilingual`, `zh`, and `en`; structured JSON
-  keys remain English for stable agent interfaces.
+- 当前项目已经可以用于学习量化投资、做离线因子实验、跑 daily research、
+  生成候选股排名、保存研究记忆、生成报告和做 dashboard 复盘。
+- 当前项目可以作为“研究辅助工具”，但还不能作为真实资金买卖的唯一依据。
+- 对“朋友推荐银轮股份，我想判断何时入场/何时卖出”这类问题，当前系统可以先做：
+  - 把银轮股份和可比股票放入同一 watchlist。
+  - 每日收盘后生成候选排名、风险提示和研究报告。
+  - 判断银轮股份在同类股票中的相对强弱、约束状态和短期量价因子表现。
+- 当前系统还不能稳定给出完整交易动作，因为缺少样本外验证、信号批评、
+  入场/卖出规则、仓位管理和人工决策记录。
 
-## P0 --- Make Daily Research Usable
+## P0 --- 先让每日研究能接近实战使用
 
-- [x] Stabilize real AkShare data ingestion
-  - [x] Add retry with exponential backoff for AkShare/Eastmoney requests
-  - [x] Add per-symbol failure isolation
-  - [x] Save failed symbols, error messages, and retry counts to a manifest
-  - [x] Add a real AkShare smoke test that reports actionable diagnostics
-  - [x] Add request throttling and configurable sleep between symbols
-  - [x] Add fallback from AkShare Eastmoney historical K-line data to Sina daily data
-  - [x] Save all-symbol failure manifests for debugging
+- [x] 稳定真实 AkShare 数据接入
+  - [x] 对 AkShare / Eastmoney 请求加入指数退避重试
+  - [x] 对单只股票下载失败做隔离，不让一只失败拖垮整批任务
+  - [x] 保存失败股票、错误信息和重试次数到 failure manifest
+  - [x] 增加真实 AkShare smoke test，并输出可行动诊断
+  - [x] 增加 symbol 间 sleep，降低接口断连概率
+  - [x] 从 AkShare Eastmoney 历史 K 线 fallback 到 Sina daily 数据
+  - [x] 在全量失败时保存可调试 manifest
 
-- [x] Add a daily research pipeline script
-  - [x] Create `scripts/run_daily_research.py`
-  - [x] Accept config for universe, symbols, date range, factor set, and output dir
-  - [x] Run DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent
-  - [x] Save a daily run manifest with all artifact paths
-  - [x] Print a concise terminal summary for the day's run
+- [x] 增加 daily research pipeline
+  - [x] 创建 `scripts/run_daily_research.py`
+  - [x] 支持配置 universe、symbols、日期范围、因子集合和输出目录
+  - [x] 串联 `DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent`
+  - [x] 保存每日运行 manifest 和所有 artifact 路径
+  - [x] 输出简洁终端摘要
 
-- [x] Support bilingual human-facing output
-  - [x] Add shared `core.i18n` language helpers
-  - [x] Add project-level `QUANT_AGENT_OUTPUT_LANGUAGE`
-  - [x] Render reports, Factor Wiki, daily summaries, AkShare smoke diagnostics, and dashboard labels in `bilingual`, `zh`, or `en`
-  - [x] Keep machine-readable JSON keys in stable English
+- [x] 支持中英双语输出
+  - [x] 增加统一 `core.i18n` 输出语言工具
+  - [x] 增加项目级 `QUANT_AGENT_OUTPUT_LANGUAGE`
+  - [x] 报告、Factor Wiki、daily summary、AkShare smoke、dashboard 支持 `bilingual` / `zh` / `en`
+  - [x] 保持 JSON 机器字段为稳定英文 key
 
-- [x] Build a practical daily stock ranking output
-  - [x] Generate Top N candidate stocks after market close
-  - [x] Include factor score, rank, recent return, volatility, drawdown, and turnover
-  - [x] Add reason text explaining why each stock is selected
-  - [x] Add risk text explaining why each stock could fail
-  - [x] Save ranking output as CSV and Markdown
+- [x] 生成每日候选股排名
+  - [x] 收盘后生成 Top N 候选股票
+  - [x] 包含因子分数、排名、近期收益、波动率、回撤和换手率
+  - [x] 增加入选理由
+  - [x] 增加风险提示
+  - [x] 保存 CSV 和 Markdown
 
-- [x] Add A-share trading constraints
-  - [x] Handle T+1 assumptions
-  - [x] Flag limit-up and limit-down rows
-  - [x] Filter or flag ST stocks
-  - [x] Handle suspended stocks explicitly in ranking
-  - [x] Add new-stock and delisting risk filters
+- [x] 增加 A 股交易约束
+  - [x] 处理 T+1 假设
+  - [x] 标记涨停和跌停
+  - [x] 过滤或标记 ST 股票
+  - [x] 在排名中显式处理停牌/缺失数据
+  - [x] 增加新股和退市风险过滤
 
-- [ ] Add transaction cost realism
-  - [ ] Add commission, stamp duty, transfer fee, and slippage assumptions
-  - [ ] Report gross vs net return
-  - [ ] Penalize high-turnover factors
-  - [ ] Add configurable cost profile for personal use
+- [x] 增加交易成本真实性
+  - [x] 增加佣金、印花税、过户费、滑点假设
+  - [x] 输出 gross return 和 net return
+  - [x] 对高换手因子做成本惩罚
+  - [x] 增加个人可配置 cost profile
+  - [x] 在报告中说明交易成本对结论的影响
 
-## P1 --- Improve Research Validity
+- [ ] 收紧默认回测质量门槛
+  - [ ] 默认要求 RankIC / Sharpe / 回撤 / 样本数达到最低标准
+  - [ ] 将“指标很差但 benchmark passed”的情况改为 needs_review 或 failed
+  - [ ] 在 daily summary 中直接显示关键失败原因
+  - [ ] 对小股票池回测增加样本不足提示
 
-- [ ] Add out-of-sample validation
-  - [ ] Support train/test date split
-  - [ ] Support walk-forward validation
-  - [ ] Compare in-sample vs out-of-sample IC, RankIC, Sharpe, and drawdown
+## P1 --- 让因子研究更可信
 
-- [ ] Add factor robustness checks
-  - [ ] Compute factor autocorrelation
-  - [ ] Compute factor turnover
-  - [ ] Compute factor correlation against existing memory records
-  - [ ] Detect redundant factors before saving to memory
+- [ ] 增加样本外验证
+  - [ ] 支持 train/test 日期切分
+  - [ ] 支持 walk-forward validation
+  - [ ] 对比样本内和样本外 IC、RankIC、Sharpe、回撤
+  - [ ] 在报告中明确标记是否通过样本外验证
 
-- [ ] Add leakage and bias checks
-  - [ ] Add lookahead detection for factor matrices
-  - [ ] Add survivorship-bias warning for static universes
-  - [ ] Track whether universe membership is point-in-time or current-only
+- [ ] 增加因子稳健性检查
+  - [ ] 计算因子自相关
+  - [ ] 计算因子换手率
+  - [ ] 计算当前因子和历史因子记忆的相关性
+  - [ ] 保存因子冗余度诊断
+  - [ ] 在保存到 MemoryAgent 前提示重复或低质量因子
 
-- [ ] Add neutralization and grouping
-  - [ ] Add market-cap neutralization when data is available
-  - [ ] Add industry neutralization when data is available
-  - [ ] Report factor performance by industry and market regime
+- [ ] 增加数据泄漏和偏差检查
+  - [ ] 检查 factor matrix 是否存在明显未来函数
+  - [ ] 对静态股票池加入幸存者偏差提示
+  - [ ] 记录 universe 是否为 point-in-time
+  - [ ] 对停牌、涨跌停、新股处理方式写入报告
 
-## P2 --- Add Practical Agents
+- [ ] 增加中性化和分组评估
+  - [ ] 在有数据时支持市值中性化
+  - [ ] 在有数据时支持行业中性化
+  - [ ] 按行业、市场状态、波动状态拆分评估因子表现
+  - [ ] 输出银轮股份这类个股相对同行的因子位置
 
-- [ ] Build CriticAgent
-  - [ ] Review each backtest result for overfitting, instability, and weak sample size
-  - [ ] Explain likely failure modes
-  - [ ] Decide whether a factor is worth tracking, revising, or rejecting
+## P2 --- 让系统能辅助“是否入场/是否卖出”
 
-- [ ] Build PortfolioAgent
-  - [ ] Convert factor ranking into a watchlist or paper portfolio
-  - [ ] Add simple position sizing rules
-  - [ ] Add max position count and max single-stock exposure
-  - [ ] Add cash and risk constraints
+- [ ] 构建 CriticAgent
+  - [ ] 审查每次回测是否过拟合、样本太少或指标不稳定
+  - [ ] 解释因子可能失效的原因
+  - [ ] 判断因子是继续跟踪、需要修改，还是应该拒绝
+  - [ ] 对“排名靠前但历史回测很差”的股票给出明确警告
 
-- [ ] Build ExperimentAgent
-  - [ ] Run batches of factor experiments
-  - [ ] Compare experiments by out-of-sample metrics
-  - [ ] Save experiment summary tables
-  - [ ] Promote promising factors into memory
+- [ ] 构建 DecisionAgent
+  - [ ] 输入 daily ranking、交易约束、回测质量、风险指标和最近走势
+  - [ ] 输出 `观察` / `可小仓试错` / `暂不介入` / `考虑退出`
+  - [ ] 为每个结论写明核心理由和反证条件
+  - [ ] 对银轮股份这类关注股生成单票决策摘要
+  - [ ] 明确提示“不是投资建议，需要人工确认”
 
-## P3 --- Make Self-Use Workflow Easier
+- [ ] 增加入场规则研究
+  - [ ] 支持基于排名连续性：连续 N 天进入 Top 区间
+  - [ ] 支持基于趋势过滤：均线、突破、回撤后修复
+  - [ ] 支持基于风险过滤：涨停、过热、波动过大、流动性不足
+  - [ ] 输出候选入场触发条件和失效条件
 
-- [ ] Add watchlist support
-  - [ ] Read `configs/watchlist.yaml`
-  - [ ] Support personal stock pools
-  - [ ] Produce watchlist-specific reports
+- [ ] 增加卖出规则研究
+  - [ ] 跌出排名 Top 区间连续 N 天
+  - [ ] 因子分数转弱或反转
+  - [ ] 最大回撤或波动率超过阈值
+  - [ ] 触发止损、止盈或持仓天数上限
+  - [ ] 输出卖出原因和继续持有的反证条件
 
-- [ ] Improve dashboard for personal review
-  - [ ] Add date range filters
-  - [ ] Add benchmark status filters
-  - [ ] Add factor category filters
-  - [ ] Link semantic search results directly to Factor Explorer
-  - [ ] Preview Markdown reports inside the dashboard
+- [ ] 构建 PortfolioAgent
+  - [ ] 将候选排名转换为 watchlist 或 paper portfolio
+  - [ ] 增加简单仓位规则
+  - [ ] 增加最大持仓数量和单票最大暴露
+  - [ ] 增加现金和风险约束
+  - [ ] 输出“如果买，最多买多少”的研究辅助结果
 
-- [ ] Add configuration templates
-  - [ ] Create `configs/daily_research.example.yaml`
-  - [ ] Create `configs/cost_profile.example.yaml`
-  - [ ] Create `configs/watchlist.example.yaml`
+## P3 --- 提高因子挖掘效率
 
-## P4 --- Operating Discipline
+- [ ] 构建 ExperimentAgent
+  - [ ] 批量运行因子实验
+  - [ ] 按样本外指标比较实验
+  - [ ] 保存实验汇总表
+  - [ ] 将有潜力的因子提升到 memory
 
-- [ ] Add a daily research checklist
-  - [ ] Data update completed
-  - [ ] Failed symbols reviewed
-  - [ ] Candidate ranking generated
-  - [ ] Risk report reviewed
-  - [ ] Manual decision logged
+- [ ] 增加因子组合研究
+  - [ ] 支持多个因子加权合成
+  - [ ] 支持简单网格搜索权重
+  - [ ] 比较单因子和组合因子的样本外表现
+  - [ ] 输出组合因子的解释和风险
 
-- [ ] Add paper-trading log
-  - [ ] Save intended trades
-  - [ ] Save actual fills manually
-  - [ ] Compare expected vs realized returns
-  - [ ] Review weekly mistakes
+- [ ] 增加可比股票池模板
+  - [ ] 为汽车零部件、新能源车、机器人等主题创建示例股票池
+  - [ ] 支持为银轮股份这类股票快速生成同行 watchlist
+  - [ ] 保存 watchlist 的行业/主题说明
 
-- [ ] Add safety notes to generated reports
-  - [ ] State that output is research support, not investment advice
-  - [ ] Show data freshness
-  - [ ] Show known data failures
-  - [ ] Show model and factor limitations
+## P4 --- 让自用流程更顺手
 
-## Suggested Next Task
+- [ ] 增加 watchlist 支持
+  - [ ] 读取 `configs/watchlist.yaml`
+  - [ ] 支持个人关注股票池
+  - [ ] 支持 watchlist 专属报告
+  - [ ] 支持多个 watchlist 批量运行
 
-Continue P0 daily usability:
+- [ ] 增加配置模板
+  - [ ] 创建 `configs/daily_research.example.yaml`
+  - [ ] 创建 `configs/cost_profile.example.yaml`
+  - [ ] 创建 `configs/watchlist.example.yaml`
+  - [ ] 创建 `configs/yinlun_watchlist.example.yaml`
 
-1. Add transaction cost realism.
-2. Then add out-of-sample validation and factor robustness checks.
+- [ ] 改进 dashboard
+  - [ ] 增加日期范围过滤
+  - [ ] 增加 benchmark status 过滤
+  - [ ] 增加因子类别过滤
+  - [ ] 在 dashboard 中预览 Markdown 报告
+  - [ ] 直接展示每日候选股排名和单票决策摘要
 
-This is the most direct path from the current offline MVP to useful daily
-self-directed trading research.
+- [ ] 增加每日研究 checklist
+  - [ ] 数据更新完成
+  - [ ] 失败股票已复核
+  - [ ] 候选排名已生成
+  - [ ] 风险报告已阅读
+  - [ ] 人工决策已记录
+
+- [ ] 增加 paper trading log
+  - [ ] 保存计划交易
+  - [ ] 手动保存实际成交
+  - [ ] 对比预期收益和实际收益
+  - [ ] 每周复盘错误
+
+## P5 --- 安全和纪律
+
+- [ ] 在所有生成报告中增加安全提示
+  - [ ] 明确输出是研究辅助，不是投资建议
+  - [ ] 显示数据新鲜度
+  - [ ] 显示已知数据失败
+  - [ ] 显示模型和因子限制
+  - [ ] 显示交易成本、滑点和流动性假设
+
+- [ ] 增加人工确认记录
+  - [ ] 记录是否真的采用 Agent 输出
+  - [ ] 记录人工否决原因
+  - [ ] 记录实际交易后的复盘结果
+
+## 建议下一步
+
+优先继续 P0：
+
+1. 收紧默认回测质量门槛。
+2. 构建 CriticAgent，用来指出“排名靠前但因子质量差”的情况。
+3. 构建 DecisionAgent，把银轮股份这类关注股转成可读的“观察 / 可小仓试错 / 暂不介入 / 考虑退出”研究结论。
+4. 增加样本外验证，避免只依赖样本内回测。
+
+这条路线最直接服务你的目标：不是产品化，而是每天辅助你做个人股票研究和交易前判断。

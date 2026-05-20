@@ -441,6 +441,7 @@ def build_factor_memory_record(
     inputs = _required_mapping(result_json, "inputs")
     metrics = _required_mapping(result_json, "metrics")
     drawdown = _required_mapping(metrics, "drawdown")
+    transaction_costs = _optional_mapping(metrics, "transaction_costs")
     benchmark = _required_mapping(result_json, "benchmark_tests")
 
     factor_name = _metadata_str(
@@ -475,10 +476,19 @@ def build_factor_memory_record(
             "ic": summary.get("mean_ic"),
             "rank_ic": summary.get("mean_rank_ic"),
             "sharpe": summary.get("sharpe"),
+            "gross_sharpe": summary.get("gross_sharpe"),
+            "net_sharpe": summary.get("net_sharpe"),
             "max_drawdown": summary.get("max_drawdown"),
             "max_drawdown_abs": drawdown.get("max_drawdown_abs"),
             "total_return": summary.get("total_return"),
-            "turnover": _metadata_optional_number(factor_metadata, "turnover"),
+            "gross_total_return": summary.get("gross_total_return"),
+            "net_total_return": summary.get("net_total_return"),
+            "turnover": summary.get("average_turnover")
+            if summary.get("average_turnover") is not None
+            else _metadata_optional_number(factor_metadata, "turnover"),
+            "average_turnover": summary.get("average_turnover"),
+            "average_transaction_cost": summary.get("average_transaction_cost"),
+            "total_transaction_cost": summary.get("total_transaction_cost"),
         },
         "benchmark": {
             "status": benchmark.get("status"),
@@ -501,6 +511,8 @@ def build_factor_memory_record(
                 factor_metadata,
                 "paper_reference",
             ),
+            "transaction_costs": inputs.get("transaction_costs"),
+            "transaction_cost_stats": transaction_costs,
         },
         "artifacts": {
             "result_json_path": str(result_json_path) if result_json_path else None,

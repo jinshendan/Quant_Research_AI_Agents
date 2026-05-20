@@ -56,6 +56,16 @@ def _result_json(*, benchmark_status: str = "passed") -> dict[str, object]:
             "factor_column": "factor__alpha",
             "factor_direction": "positive",
             "forward_return_days": 1,
+            "transaction_costs": {
+                "enabled": True,
+                "profile_name": "unit_test_costs",
+                "commission_rate": 0.0003,
+                "stamp_duty_rate": 0.0005,
+                "transfer_fee_rate": 0.00001,
+                "slippage_rate": 0.0005,
+                "buy_cost_rate": 0.00081,
+                "sell_cost_rate": 0.00131,
+            },
         },
         "summary": {
             "usable_row_count": 12,
@@ -65,14 +75,31 @@ def _result_json(*, benchmark_status: str = "passed") -> dict[str, object]:
             "mean_ic": 0.06,
             "mean_rank_ic": 0.07,
             "sharpe": 0.4 if benchmark_status == "failed" else 1.2,
+            "gross_sharpe": 0.6 if benchmark_status == "failed" else 1.4,
+            "net_sharpe": 0.4 if benchmark_status == "failed" else 1.2,
             "max_drawdown": -0.08,
             "total_return": 0.12,
+            "gross_total_return": 0.15,
+            "net_total_return": 0.12,
+            "average_turnover": 0.32,
+            "average_transaction_cost": 0.0007,
+            "total_transaction_cost": 0.0014,
         },
         "metrics": {
             "drawdown": {
                 "max_drawdown": -0.08,
                 "max_drawdown_abs": 0.08,
-            }
+            },
+            "transaction_costs": {
+                "portfolio_date_count": 2,
+                "total_turnover": 0.64,
+                "average_turnover": 0.32,
+                "total_transaction_cost": 0.0014,
+                "average_transaction_cost": 0.0007,
+                "max_transaction_cost": 0.0009,
+                "average_long_turnover": 0.16,
+                "average_short_turnover": 0.16,
+            },
         },
         "benchmark_tests": {
             "schema_version": 1,
@@ -191,11 +218,20 @@ def test_memory_agent_saves_factor_memory_record_from_result_json_path(
     assert record["performance"]["ic"] == 0.06
     assert record["performance"]["rank_ic"] == 0.07
     assert record["performance"]["sharpe"] == 1.2
+    assert record["performance"]["gross_sharpe"] == 1.4
+    assert record["performance"]["net_sharpe"] == 1.2
     assert record["performance"]["max_drawdown_abs"] == 0.08
-    assert record["performance"]["turnover"] == 0.18
+    assert record["performance"]["total_return"] == 0.12
+    assert record["performance"]["gross_total_return"] == 0.15
+    assert record["performance"]["net_total_return"] == 0.12
+    assert record["performance"]["turnover"] == 0.32
+    assert record["performance"]["average_transaction_cost"] == 0.0007
+    assert record["performance"]["total_transaction_cost"] == 0.0014
     assert record["benchmark"]["status"] == "passed"
     assert record["benchmark"]["failed_tests"] == []
     assert record["diagnostics"]["failure_reason"] is None
+    assert record["diagnostics"]["transaction_costs"]["profile_name"] == "unit_test_costs"
+    assert record["diagnostics"]["transaction_cost_stats"]["total_transaction_cost"] == 0.0014
     assert record["diagnostics"]["related_factors"] == ["alpha_000"]
     assert record["artifacts"]["result_json_path"] == str(result_json_path.resolve())
     vector_index_path = Path(response.output["vector_index_path"])

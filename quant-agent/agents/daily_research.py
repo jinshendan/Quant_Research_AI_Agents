@@ -21,6 +21,7 @@ from agents.feature_agent import FeatureAgent
 from agents.market_data_provider import MarketDataProvider
 from agents.memory_agent import MemoryAgent
 from agents.report_agent import ReportAgent
+from agents.transaction_costs import TransactionCostSpec
 from agents.trading_calendar import TradingCalendarProvider
 from core.config import AppConfig
 from core.i18n import (
@@ -94,6 +95,9 @@ class DailyResearchSpec:
     factor_metadata: dict[str, Any] = field(default_factory=dict)
     preview_rows: int = DEFAULT_DAILY_PREVIEW_ROWS
     ranking_top_n: int = DEFAULT_RANKING_TOP_N
+    transaction_costs: TransactionCostSpec = field(
+        default_factory=TransactionCostSpec,
+    )
     trading_constraints: AshareTradingConstraintSpec = field(
         default_factory=AshareTradingConstraintSpec,
     )
@@ -197,6 +201,9 @@ class DailyResearchSpec:
                 minimum=1,
                 maximum=200,
             ),
+            transaction_costs=TransactionCostSpec.from_mapping(
+                _optional_mapping_alias(raw, ("transaction_costs", "cost_profile")),
+            ),
             trading_constraints=AshareTradingConstraintSpec.from_mapping(
                 _optional_mapping(raw, "trading_constraints"),
             ),
@@ -246,6 +253,7 @@ class DailyResearchSpec:
             "factor_metadata": dict(self.factor_metadata),
             "preview_rows": self.preview_rows,
             "ranking_top_n": self.ranking_top_n,
+            "transaction_costs": self.transaction_costs.to_dict(),
             "trading_constraints": self.trading_constraints.to_dict(),
             "output_language": self.output_language,
         }
@@ -562,6 +570,7 @@ def _backtest_payload(
         "annualization_factor": spec.annualization_factor,
         "result_json_path": str(result_json_path),
         "benchmark_thresholds": dict(spec.benchmark_thresholds),
+        "transaction_costs": spec.transaction_costs.to_dict(),
         "preview_rows": spec.preview_rows,
     }
 
@@ -668,7 +677,11 @@ def _backtest_stage(response: AgentResponse) -> dict[str, Any]:
             "ic_stats": output.get("ic_stats"),
             "rank_ic_stats": output.get("rank_ic_stats"),
             "sharpe_stats": output.get("sharpe_stats"),
+            "gross_sharpe_stats": output.get("gross_sharpe_stats"),
             "drawdown_stats": output.get("drawdown_stats"),
+            "gross_drawdown_stats": output.get("gross_drawdown_stats"),
+            "transaction_costs": output.get("transaction_costs"),
+            "cost_stats": output.get("cost_stats"),
         },
     }
 
@@ -1007,6 +1020,27 @@ def _optional_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
         msg = f"config.{key} must be an object."
         raise ValueError(msg)
     return dict(value)
+
+
+def _optional_mapping_alias(
+    payload: Mapping[str, Any],
+    keys: Sequence[str],
+) -> dict[str, Any] | None:
+    found_key: str | None = None
+    found_value: Any = None
+    for key in keys:
+        if key in payload:
+            if found_key is not None:
+                msg = f"Provide only one of config.{found_key} or config.{key}."
+                raise ValueError(msg)
+            found_key = key
+            found_value = payload[key]
+    if found_key is None or found_value is None:
+        return None
+    if not isinstance(found_value, Mapping):
+        msg = f"config.{found_key} must be an object."
+        raise ValueError(msg)
+    return dict(found_value)
 
 
 def _optional_benchmark_thresholds(

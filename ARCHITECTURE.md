@@ -691,7 +691,11 @@ backtest_stats
 The portfolio return preview has:
 
 ```text
-date, long_return, short_return, long_short_return, long_count, short_count
+date, long_return, short_return, long_short_return,
+net_long_return, net_long_short_return,
+transaction_cost, long_transaction_cost, short_transaction_cost,
+turnover, long_turnover, short_turnover,
+long_count, short_count
 ```
 
 ## Day 16 --- Information Coefficient
@@ -781,9 +785,10 @@ Current Sharpe output field:
 sharpe_stats
 ```
 
-`sharpe_stats.method` is currently `mean_std`, using sample standard deviation
-of `long_short_return`. Day 18 intentionally does not compute drawdown or final
-result JSON. Those remain scoped to Days 19-20.
+`compute_sharpe_ratio(...)` still defaults to `long_short_return` for backward
+compatibility. In the full `BacktestAgent.run(...)` flow, the primary
+`sharpe_stats` now uses `net_long_short_return`, and `gross_sharpe_stats`
+preserves the pre-cost result.
 
 ## Day 19 --- Drawdown
 
@@ -811,8 +816,10 @@ drawdown_curve_preview
 drawdown_stats
 ```
 
-`drawdown_stats.method` is currently `cumulative_return`, compounding
-`long_short_return` into an equity curve.
+`compute_drawdown(...)` still defaults to `long_short_return` for backward
+compatibility. In the full `BacktestAgent.run(...)` flow, the primary
+`drawdown_stats` now compounds `net_long_short_return`, and
+`gross_drawdown_stats` preserves the pre-cost curve.
 
 ## Day 20 --- Result JSON
 
@@ -855,12 +862,13 @@ next_action
 ```
 
 `summary` provides the compact downstream view: row counts, IC date counts,
-mean IC, mean RankIC, Sharpe, max drawdown, total return, and end equity.
-`metrics` preserves the full Backtest, IC, RankIC, Sharpe, and Drawdown
-statistic groups. `previews` carries bounded records from portfolio returns,
-IC series, RankIC series, and the drawdown curve so report and benchmark
-agents can inspect representative outputs without loading every intermediate
-file.
+mean IC, mean RankIC, net Sharpe, gross Sharpe, net/gross drawdown, net/gross
+total return, end equity, turnover, and transaction-cost totals. `metrics`
+preserves the full Backtest, IC, RankIC, net/gross Sharpe, net/gross Drawdown,
+and transaction-cost statistic groups. `previews` carries bounded records from
+portfolio returns, IC series, RankIC series, and net/gross drawdown curves so
+report and benchmark agents can inspect representative outputs without loading
+every intermediate file.
 
 Day 20 intentionally does not run benchmark tests. That remains scoped to Day
 21.
@@ -1374,8 +1382,9 @@ Implemented in `quant-agent/`:
 -   the daily research manifest now includes a `ranking` stage and artifact
     paths for both ranking files
 
-The ranking intentionally remains a research-support artifact. Transaction
-costs, slippage, and position sizing remain separate P0/P2 tasks.
+The ranking intentionally remains a research-support artifact. Backtests,
+reports, memory records, and the dashboard now retain transaction-cost
+assumptions and net/gross metrics. Position sizing remains a separate P2 task.
 
 ## A-Share Trading Constraints
 
@@ -1421,6 +1430,37 @@ and delisting-risk detection use columns already present in the input panel when
 available, plus conservative name-based detection for ST and delisting-risk
 labels.
 
+## Transaction Cost Realism
+
+Implemented in `quant-agent/`:
+
+-   `TransactionCostSpec` in `agents/transaction_costs.py`
+-   configurable `transaction_costs` / `cost_profile` payload support in
+    `BacktestSpec` and `DailyResearchSpec`
+-   default A-share retail-style cost profile:
+    -   commission rate
+    -   stamp duty rate
+    -   transfer fee rate
+    -   slippage rate
+-   equal-weight basket turnover calculation for the long leg and research
+    short leg
+-   buy-side cost rate and sell-side cost rate separation; stamp duty applies
+    only to the sell side
+-   portfolio return columns for gross return, net return, transaction cost,
+    and long/short turnover
+-   primary benchmark metrics now use net long/short returns; gross metrics are
+    preserved alongside them for diagnosis
+-   MemoryAgent stores gross/net Sharpe, gross/net return, turnover, cost
+    profile, and transaction-cost statistics
+-   ReportAgent, Factor Wiki, FAISS retrieval text, and dashboard views surface
+    transaction-cost assumptions and cost impact
+
+The implementation intentionally models costs as return-level assumptions for
+research comparability. It does not model order-book depth, partial fills,
+broker-specific minimum commission, intraday execution, or real short-selling
+availability. For A-share self-use, those remain manual checks or future
+PortfolioAgent/DecisionAgent work.
+
 ## Project Output Language
 
 Implemented in `quant-agent/`:
@@ -1456,8 +1496,14 @@ Factor:
 -   IC
 -   RankIC
 -   Sharpe
+-   GrossSharpe
+-   NetSharpe
 -   Drawdown
 -   Turnover
+-   GrossTotalReturn
+-   NetTotalReturn
+-   AverageTransactionCost
+-   TotalTransactionCost
 -   FailureReason
 -   MarketCondition
 -   RelatedFactors

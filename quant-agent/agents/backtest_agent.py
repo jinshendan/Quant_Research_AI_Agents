@@ -14,6 +14,12 @@ from agents.factor_transforms import (
     DEFAULT_QUANTILE_COUNT,
     validate_quantile_count,
 )
+from agents.transaction_costs import (
+    TransactionCostSpec,
+    compute_turnover,
+    equal_weight_positions,
+    estimate_transaction_cost,
+)
 from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
 
@@ -28,12 +34,23 @@ PORTFOLIO_COLUMNS = (
     "long_return",
     "short_return",
     "long_short_return",
+    "net_long_return",
+    "net_long_short_return",
+    "transaction_cost",
+    "long_transaction_cost",
+    "short_transaction_cost",
+    "turnover",
+    "long_turnover",
+    "short_turnover",
     "long_count",
     "short_count",
 )
 IC_COLUMNS = ("date", "ic", "raw_ic", "pair_count")
 RANK_IC_COLUMNS = ("date", "rank_ic", "raw_rank_ic", "pair_count")
-SHARPE_RETURN_COLUMN = "long_short_return"
+GROSS_RETURN_COLUMN = "long_short_return"
+NET_RETURN_COLUMN = "net_long_short_return"
+EVALUATION_RETURN_COLUMN = NET_RETURN_COLUMN
+SHARPE_RETURN_COLUMN = GROSS_RETURN_COLUMN
 DRAWDOWN_RETURN_COLUMN = SHARPE_RETURN_COLUMN
 DRAWDOWN_COLUMNS = ("date", "equity_curve", "cumulative_peak", "drawdown")
 BACKTEST_RESULT_SCHEMA_VERSION = 1
@@ -104,6 +121,9 @@ class BacktestSpec:
     benchmark_thresholds: dict[str, BenchmarkThresholdValue] = field(
         default_factory=default_benchmark_thresholds
     )
+    transaction_costs: TransactionCostSpec = field(
+        default_factory=TransactionCostSpec,
+    )
     preview_rows: int = DEFAULT_PREVIEW_ROWS
 
     @classmethod
@@ -113,6 +133,9 @@ class BacktestSpec:
         aligned_data_path = _optional_path(payload, "aligned_data_path")
         result_json_path = _optional_path(payload, "result_json_path")
         benchmark_thresholds = _optional_benchmark_thresholds(payload)
+        transaction_costs = TransactionCostSpec.from_mapping(
+            _optional_mapping_alias(payload, ("transaction_costs", "cost_profile")),
+        )
         if factor_matrix_path is None and factor_manifest_path is None:
             msg = "payload.factor_matrix_path or payload.factor_manifest_path is required."
             raise ValueError(msg)
@@ -160,6 +183,7 @@ class BacktestSpec:
             annualization_factor=annualization_factor,
             result_json_path=result_json_path,
             benchmark_thresholds=benchmark_thresholds,
+            transaction_costs=transaction_costs,
             preview_rows=preview_rows,
         )
 
@@ -183,6 +207,7 @@ class BacktestSpec:
                 str(self.result_json_path) if self.result_json_path else None
             ),
             "benchmark_thresholds": dict(self.benchmark_thresholds),
+            "transaction_costs": self.transaction_costs.to_dict(),
             "preview_rows": self.preview_rows,
         }
 
@@ -388,8 +413,14 @@ class BacktestAgent:
             extra={"action": "compute_sharpe", "status": "running"},
         )
         try:
+            gross_sharpe_result = compute_sharpe_ratio(
+                result.portfolio_returns,
+                return_column=GROSS_RETURN_COLUMN,
+                annualization_factor=spec.annualization_factor,
+            )
             sharpe_result = compute_sharpe_ratio(
                 result.portfolio_returns,
+                return_column=EVALUATION_RETURN_COLUMN,
                 annualization_factor=spec.annualization_factor,
             )
         except ValueError as exc:
@@ -424,7 +455,14 @@ class BacktestAgent:
             extra={"action": "compute_drawdown", "status": "running"},
         )
         try:
-            drawdown_result = compute_drawdown(result.portfolio_returns)
+            gross_drawdown_result = compute_drawdown(
+                result.portfolio_returns,
+                return_column=GROSS_RETURN_COLUMN,
+            )
+            drawdown_result = compute_drawdown(
+                result.portfolio_returns,
+                return_column=EVALUATION_RETURN_COLUMN,
+            )
         except ValueError as exc:
             elapsed = perf_counter() - started_at
             self.logger.warning(
@@ -465,7 +503,9 @@ class BacktestAgent:
                 ic_result=ic_result,
                 rank_ic_result=rank_ic_result,
                 sharpe_result=sharpe_result,
+                gross_sharpe_result=gross_sharpe_result,
                 drawdown_result=drawdown_result,
+                gross_drawdown_result=gross_drawdown_result,
             )
         except (TypeError, ValueError) as exc:
             elapsed = perf_counter() - started_at
@@ -559,6 +599,7 @@ class BacktestAgent:
                 "drawdown_curve_columns": list(DRAWDOWN_COLUMNS),
                 "row_count": len(result.panel),
                 "usable_row_count": result.stats["usable_row_count"],
+                "transaction_costs": spec.transaction_costs.to_dict(),
                 "portfolio_date_count": len(result.portfolio_returns),
                 "ic_date_count": ic_result.stats["ic_date_count"],
                 "rank_ic_date_count": rank_ic_result.stats["rank_ic_date_count"],
@@ -578,11 +619,18 @@ class BacktestAgent:
                     drawdown_result.data,
                     spec.preview_rows,
                 ),
+                "gross_drawdown_curve_preview": _preview_records(
+                    gross_drawdown_result.data,
+                    spec.preview_rows,
+                ),
                 "backtest_stats": result.stats,
                 "ic_stats": ic_result.stats,
                 "rank_ic_stats": rank_ic_result.stats,
                 "sharpe_stats": sharpe_result.stats,
+                "gross_sharpe_stats": gross_sharpe_result.stats,
                 "drawdown_stats": drawdown_result.stats,
+                "gross_drawdown_stats": gross_drawdown_result.stats,
+                "cost_stats": result.stats["transaction_costs"],
                 "benchmark_tests": benchmark_tests,
                 "benchmark_status": benchmark_tests["status"],
                 "result_json": result_json,
@@ -871,6 +919,8 @@ def _build_portfolio_returns(
     rows: list[dict[str, Any]] = []
     skipped_date_count = 0
     sort_ascending = spec.factor_direction == "negative"
+    previous_long_weights: dict[str, float] = {}
+    previous_short_weights: dict[str, float] = {}
 
     for trade_date, group in panel.groupby("date", sort=True):
         usable = group.dropna(subset=[factor_column, FORWARD_RETURN_COLUMN]).copy()
@@ -886,18 +936,36 @@ def _build_portfolio_returns(
         )
         long_leg = sorted_group.head(selection_count)
         short_leg = sorted_group.tail(selection_count)
+        long_weights = equal_weight_positions(long_leg["symbol"].astype(str).tolist())
+        short_weights = equal_weight_positions(short_leg["symbol"].astype(str).tolist())
+        long_turnover = compute_turnover(previous_long_weights, long_weights)
+        short_turnover = compute_turnover(previous_short_weights, short_weights)
+        long_cost = estimate_transaction_cost(long_turnover, spec.transaction_costs)
+        short_cost = estimate_transaction_cost(short_turnover, spec.transaction_costs)
+        transaction_cost = long_cost + short_cost
         long_return = float(long_leg[FORWARD_RETURN_COLUMN].mean())
         short_return = float(short_leg[FORWARD_RETURN_COLUMN].mean())
+        long_short_return = long_return - short_return
         rows.append(
             {
                 "date": trade_date,
                 "long_return": long_return,
                 "short_return": short_return,
-                "long_short_return": long_return - short_return,
+                "long_short_return": long_short_return,
+                "net_long_return": long_return - long_cost,
+                "net_long_short_return": long_short_return - transaction_cost,
+                "transaction_cost": transaction_cost,
+                "long_transaction_cost": long_cost,
+                "short_transaction_cost": short_cost,
+                "turnover": long_turnover.total_turnover + short_turnover.total_turnover,
+                "long_turnover": long_turnover.total_turnover,
+                "short_turnover": short_turnover.total_turnover,
                 "long_count": int(len(long_leg)),
                 "short_count": int(len(short_leg)),
             }
         )
+        previous_long_weights = long_weights
+        previous_short_weights = short_weights
 
     portfolio_returns = pd.DataFrame(rows, columns=PORTFOLIO_COLUMNS)
     if not portfolio_returns.empty:
@@ -1263,7 +1331,9 @@ def generate_backtest_result_json(
     ic_result: InformationCoefficientResult,
     rank_ic_result: RankInformationCoefficientResult,
     sharpe_result: SharpeResult,
+    gross_sharpe_result: SharpeResult,
     drawdown_result: DrawdownResult,
+    gross_drawdown_result: DrawdownResult,
 ) -> dict[str, Any]:
     """Build the final JSON-serializable backtest result document."""
 
@@ -1282,6 +1352,7 @@ def generate_backtest_result_json(
             "forward_return_days": spec.forward_return_days,
             "quantile_count": spec.quantile_count,
             "annualization_factor": spec.annualization_factor,
+            "transaction_costs": spec.transaction_costs.to_dict(),
         },
         "summary": {
             "row_count": len(backtest_result.panel),
@@ -1292,16 +1363,34 @@ def generate_backtest_result_json(
             "mean_ic": ic_result.stats["mean_ic"],
             "mean_rank_ic": rank_ic_result.stats["mean_rank_ic"],
             "sharpe": sharpe_result.stats["sharpe"],
+            "gross_sharpe": gross_sharpe_result.stats["sharpe"],
+            "net_sharpe": sharpe_result.stats["sharpe"],
             "max_drawdown": drawdown_result.stats["max_drawdown"],
+            "gross_max_drawdown": gross_drawdown_result.stats["max_drawdown"],
+            "net_max_drawdown": drawdown_result.stats["max_drawdown"],
             "total_return": drawdown_result.stats["total_return"],
+            "gross_total_return": gross_drawdown_result.stats["total_return"],
+            "net_total_return": drawdown_result.stats["total_return"],
             "end_equity": drawdown_result.stats["end_equity"],
+            "gross_end_equity": gross_drawdown_result.stats["end_equity"],
+            "net_end_equity": drawdown_result.stats["end_equity"],
+            "average_turnover": backtest_result.stats["average_turnover"],
+            "average_transaction_cost": backtest_result.stats[
+                "average_transaction_cost"
+            ],
+            "total_transaction_cost": backtest_result.stats["transaction_costs"][
+                "total_transaction_cost"
+            ],
         },
         "metrics": {
             "backtest": backtest_result.stats,
             "ic": ic_result.stats,
             "rank_ic": rank_ic_result.stats,
             "sharpe": sharpe_result.stats,
+            "gross_sharpe": gross_sharpe_result.stats,
             "drawdown": drawdown_result.stats,
+            "gross_drawdown": gross_drawdown_result.stats,
+            "transaction_costs": backtest_result.stats["transaction_costs"],
         },
         "previews": {
             "portfolio_returns": _preview_records(
@@ -1312,6 +1401,10 @@ def generate_backtest_result_json(
             "rank_ic_series": _preview_records(rank_ic_result.data, spec.preview_rows),
             "drawdown_curve": _preview_records(
                 drawdown_result.data,
+                spec.preview_rows,
+            ),
+            "gross_drawdown_curve": _preview_records(
+                gross_drawdown_result.data,
                 spec.preview_rows,
             ),
         },
@@ -1429,6 +1522,7 @@ def _backtest_stats(
     else:
         average_long_count = float(portfolio_returns["long_count"].mean())
         average_short_count = float(portfolio_returns["short_count"].mean())
+    cost_stats = _transaction_cost_stats(portfolio_returns)
 
     return {
         "factor_column": factor_column,
@@ -1440,6 +1534,33 @@ def _backtest_stats(
         "skipped_date_count": portfolio_result.stats["skipped_date_count"],
         "average_long_count": average_long_count,
         "average_short_count": average_short_count,
+        "transaction_costs": cost_stats,
+        "average_turnover": cost_stats["average_turnover"],
+        "average_transaction_cost": cost_stats["average_transaction_cost"],
+    }
+
+
+def _transaction_cost_stats(portfolio_returns: pd.DataFrame) -> dict[str, Any]:
+    if portfolio_returns.empty:
+        return {
+            "portfolio_date_count": 0,
+            "total_turnover": 0.0,
+            "average_turnover": 0.0,
+            "total_transaction_cost": 0.0,
+            "average_transaction_cost": 0.0,
+            "max_transaction_cost": 0.0,
+            "average_long_turnover": 0.0,
+            "average_short_turnover": 0.0,
+        }
+    return {
+        "portfolio_date_count": int(len(portfolio_returns)),
+        "total_turnover": float(portfolio_returns["turnover"].sum()),
+        "average_turnover": float(portfolio_returns["turnover"].mean()),
+        "total_transaction_cost": float(portfolio_returns["transaction_cost"].sum()),
+        "average_transaction_cost": float(portfolio_returns["transaction_cost"].mean()),
+        "max_transaction_cost": float(portfolio_returns["transaction_cost"].max()),
+        "average_long_turnover": float(portfolio_returns["long_turnover"].mean()),
+        "average_short_turnover": float(portfolio_returns["short_turnover"].mean()),
     }
 
 
@@ -1510,6 +1631,27 @@ def _optional_benchmark_thresholds(
         msg = "payload.benchmark_thresholds must be an object when provided."
         raise ValueError(msg)
     return _merge_benchmark_thresholds(value, source="payload.benchmark_thresholds")
+
+
+def _optional_mapping_alias(
+    payload: Mapping[str, Any],
+    keys: Sequence[str],
+) -> Mapping[str, Any] | None:
+    found_key: str | None = None
+    found_value: Any = None
+    for key in keys:
+        if key in payload:
+            if found_key is not None:
+                msg = f"Provide only one of payload.{found_key} or payload.{key}."
+                raise ValueError(msg)
+            found_key = key
+            found_value = payload[key]
+    if found_key is None or found_value is None:
+        return None
+    if not isinstance(found_value, Mapping):
+        msg = f"payload.{found_key} must be an object when provided."
+        raise ValueError(msg)
+    return found_value
 
 
 def _merge_benchmark_thresholds(

@@ -27,8 +27,12 @@ WIKI_LABELS = {
     "ic": LocalizedText(en="IC", zh="IC"),
     "rank_ic": LocalizedText(en="RankIC", zh="RankIC"),
     "sharpe": LocalizedText(en="Sharpe", zh="夏普"),
+    "gross_sharpe": LocalizedText(en="Gross Sharpe", zh="未扣成本夏普"),
+    "net_sharpe": LocalizedText(en="Net Sharpe", zh="扣成本后夏普"),
     "max_drawdown": LocalizedText(en="Max Drawdown", zh="最大回撤"),
     "total_return": LocalizedText(en="Total Return", zh="总收益"),
+    "gross_total_return": LocalizedText(en="Gross Total Return", zh="未扣成本总收益"),
+    "net_total_return": LocalizedText(en="Net Total Return", zh="扣成本后总收益"),
     "failure_reason": LocalizedText(en="Failure Reason", zh="失败原因"),
     "passed_benchmarks": LocalizedText(en="Passed benchmarks", zh="通过基准"),
     "failed_benchmarks": LocalizedText(en="Failed benchmarks", zh="未通过基准"),
@@ -40,6 +44,14 @@ WIKI_LABELS = {
     "forward_return_days": LocalizedText(en="Forward return days", zh="前瞻收益天数"),
     "universe": LocalizedText(en="Universe", zh="股票池"),
     "turnover": LocalizedText(en="Turnover", zh="换手率"),
+    "average_transaction_cost": LocalizedText(
+        en="Average transaction cost",
+        zh="平均交易成本",
+    ),
+    "total_transaction_cost": LocalizedText(
+        en="Total transaction cost",
+        zh="累计交易成本",
+    ),
     "benchmark_status": LocalizedText(en="Benchmark status", zh="基准状态"),
     "failed_tests": LocalizedText(en="Failed tests", zh="失败测试"),
     "market_condition": LocalizedText(en="Market condition", zh="市场条件"),
@@ -239,12 +251,24 @@ def _factor_section(
         f"{_format_number(performance.get('rank_ic'))}",
         f"- {_wiki_label('sharpe', output_language)}: "
         f"{_format_number(performance.get('sharpe'))}",
+        f"- {_wiki_label('net_sharpe', output_language)}: "
+        f"{_format_number(performance.get('net_sharpe'))}",
+        f"- {_wiki_label('gross_sharpe', output_language)}: "
+        f"{_format_number(performance.get('gross_sharpe'))}",
         f"- {_wiki_label('max_drawdown', output_language)}: "
         f"{_format_number(performance.get('max_drawdown'))}",
         f"- {_wiki_label('total_return', output_language)}: "
         f"{_format_number(performance.get('total_return'))}",
+        f"- {_wiki_label('net_total_return', output_language)}: "
+        f"{_format_number(performance.get('net_total_return'))}",
+        f"- {_wiki_label('gross_total_return', output_language)}: "
+        f"{_format_number(performance.get('gross_total_return'))}",
         f"- {_wiki_label('turnover', output_language)}: "
         f"{_format_number(performance.get('turnover'))}",
+        f"- {_wiki_label('average_transaction_cost', output_language)}: "
+        f"{_format_number(performance.get('average_transaction_cost'))}",
+        f"- {_wiki_label('total_transaction_cost', output_language)}: "
+        f"{_format_number(performance.get('total_transaction_cost'))}",
         f"- {_wiki_label('benchmark_status', output_language)}: "
         f"{_text_or_na(benchmark.get('status'))}",
         f"- {_wiki_label('failed_tests', output_language)}: "

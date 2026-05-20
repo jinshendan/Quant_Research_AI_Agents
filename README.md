@@ -24,7 +24,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 - 作为个人实盘前研究辅助工具
 
 当前项目不适合直接作为自动交易系统，也不能单独作为真实资金买卖决策依据。
-它仍缺少交易成本、组合管理和实盘风控。
+它仍缺少样本外验证、组合管理、实盘风控和完整入场/卖出决策规则。
 
 ### 已实现功能
 
@@ -43,6 +43,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | FeatureAgent | 已实现 | 计算因子矩阵、ranking transform、rolling feature |
 | FactorGenerationAgent | 已实现 | 生成 50 个确定性候选因子 |
 | BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
+| 交易成本模型 | 已实现 | 佣金、印花税、过户费、滑点、换手率、gross/net 指标 |
 | Benchmark tests | 已实现 | 对回测结果做确定性质量门槛检查 |
 | MemoryAgent | 已实现 | 保存因子研究记录到 JSONL |
 | FAISS 语义检索 | 已实现 | 对因子记忆做本地向量索引和搜索 |
@@ -65,6 +66,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | FeatureAgent | `quant-agent/agents/feature_agent.py` | 从 aligned OHLCV 计算因子矩阵 |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | 生成候选因子定义 |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
+| Transaction Costs | `quant-agent/agents/transaction_costs.py` | 统一管理 A 股交易成本假设和换手成本估算 |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | 保存因子研究记录和 FAISS 索引 |
 | ReportAgent | `quant-agent/agents/report_agent.py` | 生成 Markdown 研究报告 |
 | A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | 统一生成 A 股交易约束标签 |
@@ -182,6 +184,14 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
   "factor_direction": "positive",
   "quantile_count": 5,
   "ranking_top_n": 10,
+  "transaction_costs": {
+    "enabled": true,
+    "profile_name": "a_share_retail_default",
+    "commission_rate": 0.0003,
+    "stamp_duty_rate": 0.0005,
+    "transfer_fee_rate": 0.00001,
+    "slippage_rate": 0.0005
+  },
   "trading_constraints": {
     "t_plus_one": true,
     "exclude_suspended": true,
@@ -212,8 +222,8 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
 排名包含因子分数、排名、近 5 日收益、20 日波动率、20 日回撤、换手率、
 交易约束、入选理由和风险提示。默认约束会过滤停牌/缺失、ST、新股和退市风险；
 涨跌停默认标记但不过滤，可通过 `trading_constraints.exclude_limit_up` 和
-`trading_constraints.exclude_limit_down` 收紧。当前排名仍是研究辅助输出，不含
-交易成本、滑点和仓位管理。
+`trading_constraints.exclude_limit_down` 收紧。回测、报告、记忆和 dashboard 会保留
+交易成本假设、gross 指标和 net 指标；每日股票排名仍是研究辅助输出，不负责仓位管理。
 
 运行 dashboard：
 
@@ -300,6 +310,13 @@ request = AgentRequest.create(
         "factor_direction": "positive",
         "forward_return_days": 1,
         "quantile_count": 5,
+        "transaction_costs": {
+            "enabled": True,
+            "commission_rate": 0.0003,
+            "stamp_duty_rate": 0.0005,
+            "transfer_fee_rate": 0.00001,
+            "slippage_rate": 0.0005,
+        },
         "result_json_path": "results/backtests/custom_batch_return_5d.json",
     }
 )
@@ -308,6 +325,8 @@ response = BacktestAgent().run(request)
 print(response.output["ic_stats"])
 print(response.output["rank_ic_stats"])
 print(response.output["sharpe_stats"])
+print(response.output["gross_sharpe_stats"])
+print(response.output["cost_stats"])
 print(response.output["drawdown_stats"])
 ```
 
@@ -372,7 +391,7 @@ print(report_response.output["report_path"])
 
 | 优先级 | 计划 |
 | --- | --- |
-| P0 | 加入交易成本：佣金、印花税、过户费、滑点和换手惩罚 |
+| P0 | 收紧默认回测质量门槛，减少“指标差但通过”的误判 |
 | P1 | 加入样本外验证、walk-forward validation、因子稳健性检查 |
 | P1 | 加入数据泄漏和幸存者偏差检查 |
 | P2 | 构建 CriticAgent、PortfolioAgent、ExperimentAgent |
@@ -423,6 +442,7 @@ for real-money trading decisions.
 | FeatureAgent | Done | Factor matrices, ranking transforms, rolling features |
 | FactorGenerationAgent | Done | 50 deterministic candidate factors |
 | BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
+| Transaction cost model | Done | Commission, stamp duty, transfer fee, slippage, turnover, gross/net metrics |
 | Benchmark tests | Done | Deterministic gates over backtest results |
 | MemoryAgent | Done | JSONL factor research memory |
 | FAISS search | Done | Local semantic search over factor memory |
@@ -445,6 +465,7 @@ for real-money trading decisions.
 | FeatureAgent | `quant-agent/agents/feature_agent.py` | Compute factor matrices from aligned OHLCV |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | Generate candidate factor definitions |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
+| Transaction Costs | `quant-agent/agents/transaction_costs.py` | Centralize A-share cost assumptions and turnover cost estimates |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | Store factor research records and FAISS indexes |
 | ReportAgent | `quant-agent/agents/report_agent.py` | Generate Markdown research reports |
 | A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | Generate reusable A-share trading-constraint flags |
@@ -534,6 +555,14 @@ Minimal JSON config:
   "factor_direction": "positive",
   "quantile_count": 5,
   "ranking_top_n": 10,
+  "transaction_costs": {
+    "enabled": true,
+    "profile_name": "a_share_retail_default",
+    "commission_rate": 0.0003,
+    "stamp_duty_rate": 0.0005,
+    "transfer_fee_rate": 0.00001,
+    "slippage_rate": 0.0005
+  },
   "trading_constraints": {
     "t_plus_one": true,
     "exclude_suspended": true,
@@ -568,8 +597,9 @@ text. By default it filters suspended/missing rows, ST stocks, new stocks, and
 delisting-risk stocks. Limit-up and limit-down rows are flagged but not filtered
 unless `trading_constraints.exclude_limit_up` or
 `trading_constraints.exclude_limit_down` is enabled. It is still research
-support only; transaction costs, slippage, and position sizing are separate
-roadmap items.
+support only. Backtests, reports, memory records, and the dashboard now retain
+configurable transaction-cost assumptions plus gross and net metrics; stock
+ranking still does not perform position sizing.
 
 Run tests and checks:
 
@@ -643,11 +673,19 @@ response = BacktestAgent().run(
             "factor_column": "factor__return_5d",
             "factor_direction": "positive",
             "forward_return_days": 1,
+            "transaction_costs": {
+                "enabled": True,
+                "commission_rate": 0.0003,
+                "stamp_duty_rate": 0.0005,
+                "transfer_fee_rate": 0.00001,
+                "slippage_rate": 0.0005,
+            },
             "result_json_path": "results/backtests/custom_batch_return_5d.json",
         }
     )
 )
 print(response.output["benchmark_status"])
+print(response.output["cost_stats"])
 ```
 
 ### Project Structure
@@ -675,7 +713,7 @@ print(response.output["benchmark_status"])
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- add realistic transaction costs and slippage
+- tighten default backtest quality gates
 - add out-of-sample and walk-forward validation
 - add factor robustness, leakage, and survivorship-bias checks
 - build CriticAgent, PortfolioAgent, and ExperimentAgent

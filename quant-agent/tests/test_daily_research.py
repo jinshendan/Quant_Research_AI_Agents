@@ -39,6 +39,13 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
                     "template_ids": ["close_to_open_return"],
                     "factor_set_name": "daily_test",
                     "ranking_top_n": 5,
+                    "cost_profile": {
+                        "profile_name": "unit_test_costs",
+                        "commission_rate": 0.0002,
+                        "stamp_duty_rate": 0.0005,
+                        "transfer_fee_rate": 0.00001,
+                        "slippage_rate": 0.001,
+                    },
                     "trading_constraints": {
                         "exclude_limit_up": True,
                         "new_stock_min_trading_days": 120,
@@ -58,6 +65,8 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
     assert spec.output_dir == Path("runs")
     assert spec.template_ids == ("close_to_open_return",)
     assert spec.ranking_top_n == 5
+    assert spec.transaction_costs.profile_name == "unit_test_costs"
+    assert spec.transaction_costs.slippage_rate == 0.001
     assert spec.trading_constraints.exclude_limit_up is True
     assert spec.trading_constraints.new_stock_min_trading_days == 120
     assert spec.output_language == "zh"
@@ -127,6 +136,10 @@ def test_run_daily_research_writes_manifest_and_artifacts(tmp_path: Path) -> Non
     assert manifest["summary"]["benchmark_status"] == "passed"
     assert manifest["summary"]["memory_id"].startswith("factor-memory-")
     assert manifest["summary"]["top_ranked_symbols"] == ["000006", "000005", "000004"]
+    assert manifest["request"]["transaction_costs"]["enabled"] is True
+    assert manifest["stages"]["backtest"]["summary"]["cost_stats"][
+        "total_transaction_cost"
+    ] > 0
 
     artifact_keys = (
         "aligned_data_path",
