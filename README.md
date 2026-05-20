@@ -40,7 +40,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | 数据可靠性 | 已实现 | 单票重试、symbol 间 sleep、部分失败隔离、失败 manifest、AkShare smoke diagnostic、历史行情备用接口 |
 | HypothesisAgent | 已实现 | 生成结构化 alpha 假设 |
 | 因子模板库 | 已实现 | 动量、反转、波动率、流动性、突破等模板 |
-| FeatureAgent | 已实现 | 计算因子矩阵、ranking transform、rolling feature |
+| FeatureAgent | 已实现 | 计算因子矩阵、组合因子、ranking transform、rolling feature |
 | FactorGenerationAgent | 已实现 | 生成 50 个确定性候选因子 |
 | BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
 | 交易成本模型 | 已实现 | 佣金、印花税、过户费、滑点、换手率、gross/net 指标 |
@@ -57,14 +57,14 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | Factor Explorer | 已实现 | 查看单个因子记录、诊断和关联报告 |
 | Semantic Search UI | 已实现 | dashboard 中搜索历史因子记忆 |
 | 端到端离线测试 | 已实现 | 覆盖 DataAgent 到 Dashboard/Search 的 artifact handoff |
-| Daily research pipeline | 已实现 | 配置驱动运行 DataAgent 到 ReportAgent 并保存 manifest |
+| Daily research pipeline | 已实现 | 配置驱动运行 DataAgent 到 ReportAgent，显式记录最终使用的因子列并保存 manifest |
 
 ### 核心模块
 
 | 模块 | 文件 | 用途 |
 | --- | --- | --- |
 | DataAgent | `quant-agent/agents/data_agent.py` | 获取、清洗、对齐、缓存并保存市场数据 |
-| FeatureAgent | `quant-agent/agents/feature_agent.py` | 从 aligned OHLCV 计算因子矩阵 |
+| FeatureAgent | `quant-agent/agents/feature_agent.py` | 从 aligned OHLCV 计算单因子和组合因子矩阵 |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | 生成候选因子定义 |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | 统一管理 A 股交易成本假设和换手成本估算 |
@@ -183,6 +183,7 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
   "end_date": "2024-03-31",
   "output_dir": "daily_runs",
   "template_ids": ["close_to_open_return"],
+  "factor_column": "factor__close_to_open_return",
   "factor_set_name": "daily_demo",
   "factor_direction": "positive",
   "quantile_count": 5,
@@ -213,6 +214,31 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
   }
 }
 ```
+
+如果 `template_ids` 里配置多个模板，它们只是多个独立候选因子，不会自动变成组合因子。
+这时必须显式设置 `factor_column`；否则 pipeline 会停止并提示你选择目标因子。
+如确实要使用多个弱信号组合，可以使用 `composite_factors`：
+
+```json
+{
+  "template_ids": ["close_to_open_return", "return_5d", "volume_ratio_5d_20d"],
+  "composite_factors": [
+    {
+      "name": "daily_blend_v1",
+      "normalize": "rank_pct",
+      "components": [
+        {"factor": "close_to_open_return", "weight": 0.4},
+        {"factor": "return_5d", "weight": 0.4},
+        {"factor": "volume_ratio_5d_20d", "weight": 0.2}
+      ]
+    }
+  ],
+  "factor_column": "factor__daily_blend_v1"
+}
+```
+
+`normalize` 支持 `none`、`rank_pct` 和 `zscore`。组合因子会写入 factor matrix、
+factor manifest 和 daily research manifest。
 
 该脚本会依次运行 `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent
 -> DailyRankingAgent -> MemoryAgent -> ReportAgent`，并在 `output_dir/run_id/daily_research_manifest.json` 保存
@@ -287,6 +313,16 @@ request = AgentRequest.create(
     {
         "aligned_data_path": "data/processed/aligned_ohlcv_akshare_custom_batch_daily_none_20240102_20240103.csv",
         "template_ids": ["return_5d", "volume_ratio_5d_20d"],
+        "composite_factors": [
+            {
+                "name": "momentum_volume_blend",
+                "normalize": "rank_pct",
+                "components": [
+                    {"factor": "return_5d", "weight": 0.6},
+                    {"factor": "volume_ratio_5d_20d", "weight": 0.4},
+                ],
+            }
+        ],
         "rank_transforms": ["rank_pct"],
         "rolling_features": ["mean", "zscore"],
         "rolling_windows": [5, 20],
@@ -394,12 +430,12 @@ print(report_response.output["report_path"])
 
 | 优先级 | 计划 |
 | --- | --- |
-| P0 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
-| P1 | 加入样本外验证、walk-forward validation、因子稳健性检查 |
-| P1 | 加入数据泄漏和幸存者偏差检查 |
-| P2 | 构建 DecisionAgent、PortfolioAgent、ExperimentAgent |
-| P3 | 支持 watchlist、dashboard 过滤器、配置模板 |
-| P4 | 增加每日研究 checklist、paper trading log、报告安全提示 |
+| P0 | 完善因子选择、组合因子和因子定义注册表 |
+| P1 | 构建 ExperimentAgent 和 ExperimentStore，批量运行候选因子实验 |
+| P2 | 加入样本外验证、walk-forward validation、因子衰减和稳健性检查 |
+| P3 | 做因子相关性分析、多因子 alpha 选择和候选池管理 |
+| P4 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
+| P5 | 构建 PortfolioAgent、paper trading log 和组合风控 |
 
 ### 重要提醒
 
@@ -442,7 +478,7 @@ for real-money trading decisions.
 | Data reliability | Done | Retry, symbol sleep, partial success, failure manifest, AkShare smoke diagnostics, historical-data fallback |
 | HypothesisAgent | Done | Structured alpha hypotheses |
 | Factor templates | Done | Momentum, reversal, volatility, liquidity, breakout templates |
-| FeatureAgent | Done | Factor matrices, ranking transforms, rolling features |
+| FeatureAgent | Done | Factor matrices, composite factors, ranking transforms, rolling features |
 | FactorGenerationAgent | Done | 50 deterministic candidate factors |
 | BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
 | Transaction cost model | Done | Commission, stamp duty, transfer fee, slippage, turnover, gross/net metrics |
@@ -459,14 +495,14 @@ for real-money trading decisions.
 | Factor Explorer | Done | Single-factor diagnostics and linked reports |
 | Semantic Search UI | Done | Search historical factor memory from the dashboard |
 | End-to-end offline test | Done | DataAgent to Dashboard/Search artifact handoff |
-| Daily research pipeline | Done | Config-driven DataAgent-to-ReportAgent run with manifest |
+| Daily research pipeline | Done | Config-driven DataAgent-to-ReportAgent run with explicit selected factor column and manifest |
 
 ### Core Modules
 
 | Module | File | Purpose |
 | --- | --- | --- |
 | DataAgent | `quant-agent/agents/data_agent.py` | Ingest, clean, align, cache, and persist market data |
-| FeatureAgent | `quant-agent/agents/feature_agent.py` | Compute factor matrices from aligned OHLCV |
+| FeatureAgent | `quant-agent/agents/feature_agent.py` | Compute single-factor and composite-factor matrices from aligned OHLCV |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | Generate candidate factor definitions |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | Centralize A-share cost assumptions and turnover cost estimates |
@@ -556,6 +592,7 @@ Minimal JSON config:
   "end_date": "2024-03-31",
   "output_dir": "daily_runs",
   "template_ids": ["close_to_open_return"],
+  "factor_column": "factor__close_to_open_return",
   "factor_set_name": "daily_demo",
   "factor_direction": "positive",
   "quantile_count": 5,
@@ -586,6 +623,32 @@ Minimal JSON config:
   }
 }
 ```
+
+If `template_ids` contains multiple templates, they are separate candidate
+factors, not an automatic composite. In that case, set `factor_column`
+explicitly or the pipeline stops with a selection error. To combine weak
+signals, define `composite_factors` and select the generated composite column:
+
+```json
+{
+  "template_ids": ["close_to_open_return", "return_5d", "volume_ratio_5d_20d"],
+  "composite_factors": [
+    {
+      "name": "daily_blend_v1",
+      "normalize": "rank_pct",
+      "components": [
+        {"factor": "close_to_open_return", "weight": 0.4},
+        {"factor": "return_5d", "weight": 0.4},
+        {"factor": "volume_ratio_5d_20d", "weight": 0.2}
+      ]
+    }
+  ],
+  "factor_column": "factor__daily_blend_v1"
+}
+```
+
+`normalize` supports `none`, `rank_pct`, and `zscore`. Composite factors are
+written into the factor matrix, factor manifest, and daily research manifest.
 
 The script runs `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent
 -> DailyRankingAgent -> MemoryAgent -> ReportAgent` and writes
@@ -720,10 +783,10 @@ print(response.output["cost_stats"])
 The roadmap lives in `TODO.md`. The next priorities are:
 
 - build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions
-- add out-of-sample and walk-forward validation
-- add factor robustness, leakage, and survivorship-bias checks
-- build DecisionAgent, PortfolioAgent, and ExperimentAgent
-- improve dashboard filters and watchlist workflows
+- build ExperimentAgent and ExperimentStore for batch factor research
+- add out-of-sample, walk-forward, decay, and robustness validation
+- add factor correlation analysis and multi-factor alpha selection
+- build PortfolioAgent, paper trading logs, dashboard filters, and watchlist workflows
 
 ### Safety Note
 

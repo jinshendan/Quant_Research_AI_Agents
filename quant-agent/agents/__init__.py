@@ -91,6 +91,8 @@ from agents.factor_generator import (
     GeneratedFactor,
 )
 from agents.feature_agent import (
+    CompositeFactorComponent,
+    CompositeFactorSpec,
     FeatureAgent,
     FeatureGenerationResult,
     FeatureSpec,
@@ -160,6 +162,8 @@ __all__ = [
     "BacktestResultJson",
     "BacktestSpec",
     "CalendarAlignmentResult",
+    "CompositeFactorComponent",
+    "CompositeFactorSpec",
     "CriticAgent",
     "CriticSpec",
     "DataAgent",

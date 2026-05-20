@@ -36,8 +36,20 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
                     "start_date": "2024-01-01",
                     "end_date": "2024-01-04",
                     "output_dir": "runs",
-                    "template_ids": ["close_to_open_return"],
+                    "template_ids": ["return_3d", "close_to_open_return"],
+                    "composite_factors": [
+                        {
+                            "name": "daily_blend",
+                            "normalize": "rank_pct",
+                            "components": [
+                                {"factor": "return_3d", "weight": 0.6},
+                                {"factor": "close_to_open_return", "weight": 0.4},
+                            ],
+                        }
+                    ],
                     "factor_set_name": "daily_test",
+                    "factor_column": "factor__daily_blend",
+                    "allow_implicit_factor_column": False,
                     "ranking_top_n": 5,
                     "cost_profile": {
                         "profile_name": "unit_test_costs",
@@ -63,7 +75,10 @@ def test_load_daily_research_config_accepts_nested_json(tmp_path: Path) -> None:
     assert spec.universe == "custom_batch"
     assert spec.symbols == ("000001", "000002")
     assert spec.output_dir == Path("runs")
-    assert spec.template_ids == ("close_to_open_return",)
+    assert spec.template_ids == ("return_3d", "close_to_open_return")
+    assert spec.composite_factors[0].factor_column == "factor__daily_blend"
+    assert spec.factor_column == "factor__daily_blend"
+    assert spec.allow_implicit_factor_column is False
     assert spec.ranking_top_n == 5
     assert spec.transaction_costs.profile_name == "unit_test_costs"
     assert spec.transaction_costs.slippage_rate == 0.001
@@ -135,6 +150,8 @@ def test_run_daily_research_writes_manifest_and_artifacts(tmp_path: Path) -> Non
         "report",
     }
     assert manifest["summary"]["factor_column"] == "factor__close_to_open_return"
+    assert manifest["summary"]["selected_factor_column"] == "factor__close_to_open_return"
+    assert manifest["summary"]["factor_selection_policy"] == "single_factor"
     assert manifest["summary"]["benchmark_status"] == "passed"
     assert manifest["summary"]["critic_verdict"] == "track"
     assert manifest["summary"]["critic_severity"] == "low"
@@ -191,6 +208,100 @@ def test_run_daily_research_writes_error_manifest(tmp_path: Path) -> None:
     assert manifest["status"] == "error"
     assert "data" in manifest["stages"]
     assert manifest["error"] == result.error
+
+
+def test_run_daily_research_requires_factor_column_for_multiple_factors(
+    tmp_path: Path,
+) -> None:
+    spec = DailyResearchSpec.from_mapping(
+        {
+            "run_id": "daily-multi-factor-error",
+            "universe": "custom_batch",
+            "symbols": list(_symbols()),
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-04",
+            "output_dir": "daily_runs",
+            "use_cache": False,
+            "template_ids": ["close_to_open_return", "close_position_in_range"],
+        }
+    )
+
+    result = run_daily_research(
+        _config(tmp_path),
+        spec,
+        providers={"akshare": OfflineMarketDataProvider(_symbols())},
+        calendar_providers={"akshare": OfflineTradingCalendarProvider()},
+    )
+
+    assert result.status == "error"
+    assert "config.factor_column is required" in str(result.error)
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "error"
+    assert manifest["stages"]["feature"]["summary"]["factor_columns"] == [
+        "factor__close_to_open_return",
+        "factor__close_position_in_range",
+    ]
+    assert "backtest" not in manifest["stages"]
+
+
+def test_run_daily_research_uses_configured_composite_factor(tmp_path: Path) -> None:
+    spec = DailyResearchSpec.from_mapping(
+        {
+            "run_id": "daily-composite",
+            "universe": "custom_batch",
+            "symbols": list(_symbols()),
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-04",
+            "output_dir": "daily_runs",
+            "use_cache": False,
+            "template_ids": ["close_to_open_return", "close_position_in_range"],
+            "composite_factors": [
+                {
+                    "name": "daily_blend",
+                    "normalize": "rank_pct",
+                    "components": [
+                        {"factor": "close_to_open_return", "weight": 0.7},
+                        {"factor": "close_position_in_range", "weight": 0.3},
+                    ],
+                }
+            ],
+            "factor_column": "factor__daily_blend",
+            "factor_set_name": "daily_composite",
+            "factor_direction": "positive",
+            "quantile_count": 3,
+            "benchmark_thresholds": {
+                "min_usable_rows": 18,
+                "min_portfolio_dates": 3,
+                "min_ic_dates": 3,
+                "min_rank_ic_dates": 3,
+                "min_average_leg_count": 2,
+                "min_mean_ic": 0.5,
+                "min_mean_rank_ic": 0.5,
+                "min_total_return": 0.0,
+                "max_drawdown_abs": 0.05,
+            },
+            "preview_rows": 0,
+            "ranking_top_n": 3,
+        }
+    )
+
+    result = run_daily_research(
+        _config(tmp_path),
+        spec,
+        providers={"akshare": OfflineMarketDataProvider(_symbols())},
+        calendar_providers={"akshare": OfflineTradingCalendarProvider()},
+    )
+
+    assert result.status == "success"
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["summary"]["factor_column"] == "factor__daily_blend"
+    assert manifest["summary"]["selected_factor_column"] == "factor__daily_blend"
+    assert manifest["summary"]["factor_selection_policy"] == "configured"
+    assert manifest["stages"]["feature"]["summary"]["composite_factor_columns"] == [
+        "factor__daily_blend"
+    ]
+    assert manifest["summary"]["top_ranked_symbols"] == ["000006", "000005", "000004"]
 
 
 @dataclass(slots=True)

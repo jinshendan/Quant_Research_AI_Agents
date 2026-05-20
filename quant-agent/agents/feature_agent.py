@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,8 +36,106 @@ IDENTITY_COLUMNS = ("date", "symbol")
 SUSPENSION_COLUMN = "is_suspended_or_missing"
 DEFAULT_PREVIEW_ROWS = 5
 MAX_PREVIEW_ROWS = 50
+DEFAULT_COMPOSITE_METHOD = "weighted_sum"
+DEFAULT_COMPOSITE_NORMALIZE = "none"
+SUPPORTED_COMPOSITE_METHODS = frozenset({DEFAULT_COMPOSITE_METHOD})
+SUPPORTED_COMPOSITE_NORMALIZERS = frozenset({"none", "rank_pct", "zscore"})
+_COMPOSITE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 
 FactorExecutor = Callable[[pd.DataFrame], pd.Series]
+
+
+@dataclass(frozen=True, slots=True)
+class CompositeFactorComponent:
+    """One weighted input into a composite factor."""
+
+    factor: str
+    weight: float
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> CompositeFactorComponent:
+        factor = _required_str(payload, "factor")
+        weight = _required_float(payload, "weight")
+        return cls(factor=factor, weight=weight)
+
+    @property
+    def factor_column(self) -> str:
+        return _factor_column_reference(self.factor)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"factor": self.factor, "weight": self.weight}
+
+
+@dataclass(frozen=True, slots=True)
+class CompositeFactorSpec:
+    """Validated definition for a weighted composite factor."""
+
+    name: str
+    components: tuple[CompositeFactorComponent, ...]
+    method: str = DEFAULT_COMPOSITE_METHOD
+    normalize: str = DEFAULT_COMPOSITE_NORMALIZE
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> CompositeFactorSpec:
+        name = _validate_composite_name(_required_str(payload, "name"))
+        method = _optional_str(payload, "method", DEFAULT_COMPOSITE_METHOD)
+        if method not in SUPPORTED_COMPOSITE_METHODS:
+            msg = (
+                f"composite factor {name} method must be one of: "
+                f"{', '.join(sorted(SUPPORTED_COMPOSITE_METHODS))}."
+            )
+            raise ValueError(msg)
+        normalize = _optional_str(payload, "normalize", DEFAULT_COMPOSITE_NORMALIZE)
+        if normalize not in SUPPORTED_COMPOSITE_NORMALIZERS:
+            msg = (
+                f"composite factor {name} normalize must be one of: "
+                f"{', '.join(sorted(SUPPORTED_COMPOSITE_NORMALIZERS))}."
+            )
+            raise ValueError(msg)
+
+        raw_components = payload.get("components")
+        if (
+            isinstance(raw_components, str)
+            or not isinstance(raw_components, Sequence)
+            or not raw_components
+        ):
+            msg = f"composite factor {name} components must be a non-empty sequence."
+            raise ValueError(msg)
+
+        components = []
+        for item in raw_components:
+            if not isinstance(item, Mapping):
+                msg = f"composite factor {name} components must contain objects."
+                raise ValueError(msg)
+            components.append(CompositeFactorComponent.from_mapping(item))
+
+        component_refs = [component.factor_column for component in components]
+        if len(component_refs) != len(set(component_refs)):
+            msg = f"composite factor {name} contains duplicate components."
+            raise ValueError(msg)
+        if not any(component.weight != 0.0 for component in components):
+            msg = f"composite factor {name} must contain at least one non-zero weight."
+            raise ValueError(msg)
+
+        return cls(
+            name=name,
+            components=tuple(components),
+            method=method,
+            normalize=normalize,
+        )
+
+    @property
+    def factor_column(self) -> str:
+        return f"factor__{self.name}"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "factor_column": self.factor_column,
+            "method": self.method,
+            "normalize": self.normalize,
+            "components": [component.to_dict() for component in self.components],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +144,7 @@ class FeatureSpec:
 
     aligned_data_path: Path
     template_ids: tuple[str, ...] = ()
+    composite_factors: tuple[CompositeFactorSpec, ...] = ()
     rolling_features: tuple[str, ...] = ()
     rolling_windows: tuple[int, ...] = ()
     rank_transforms: tuple[str, ...] = ()
@@ -57,6 +157,7 @@ class FeatureSpec:
     def from_payload(cls, payload: Mapping[str, Any]) -> FeatureSpec:
         aligned_data_path = _required_path(payload, "aligned_data_path")
         template_ids = _optional_str_sequence(payload, "template_ids")
+        composite_factors = _optional_composite_factors(payload, "composite_factors")
         rolling_features = _optional_str_sequence(payload, "rolling_features")
         raw_rolling_windows = _optional_int_sequence(payload, "rolling_windows")
         rolling_windows = (
@@ -90,6 +191,7 @@ class FeatureSpec:
         return cls(
             aligned_data_path=aligned_data_path,
             template_ids=template_ids,
+            composite_factors=composite_factors,
             rolling_features=rolling_features,
             rolling_windows=rolling_windows,
             rank_transforms=rank_transforms,
@@ -103,6 +205,10 @@ class FeatureSpec:
         return {
             "aligned_data_path": str(self.aligned_data_path),
             "template_ids": list(self.template_ids),
+            "composite_factors": [
+                composite_factor.to_dict()
+                for composite_factor in self.composite_factors
+            ],
             "rolling_features": list(self.rolling_features),
             "rolling_windows": list(self.rolling_windows),
             "rank_transforms": list(self.rank_transforms),
@@ -120,6 +226,7 @@ class FeatureGenerationResult:
     data: pd.DataFrame
     factor_columns: tuple[str, ...]
     base_factor_columns: tuple[str, ...]
+    composite_factor_columns: tuple[str, ...]
     rolling_feature_columns: tuple[str, ...]
     transformed_factor_columns: tuple[str, ...]
     stats: dict[str, Any]
@@ -180,6 +287,7 @@ class FeatureAgent:
                 rolling_feature_names=spec.rolling_features,
                 rolling_windows=spec.rolling_windows,
                 rank_transform_names=spec.rank_transforms,
+                composite_factors=spec.composite_factors,
                 quantile_count=spec.quantile_count,
             )
         except ValueError as exc:
@@ -195,6 +303,7 @@ class FeatureAgent:
                     elapsed,
                     template_count=len(templates),
                     template_ids=[template.template_id for template in templates],
+                    composite_count=len(spec.composite_factors),
                 ),
             )
 
@@ -221,6 +330,11 @@ class FeatureAgent:
                         source_aligned_data_path=str(spec.aligned_data_path),
                         template_ids=tuple(template_ids),
                         base_factor_columns=result.base_factor_columns,
+                        composite_factor_columns=result.composite_factor_columns,
+                        composite_factor_definitions=tuple(
+                            composite_factor.to_dict()
+                            for composite_factor in spec.composite_factors
+                        ),
                         rolling_feature_columns=result.rolling_feature_columns,
                         transformed_factor_columns=result.transformed_factor_columns,
                         feature_stats=result.stats,
@@ -244,6 +358,7 @@ class FeatureAgent:
                         factor_count=len(result.factor_columns),
                         template_count=len(templates),
                         template_ids=template_ids,
+                        composite_count=len(spec.composite_factors),
                     ),
                 )
             self.logger.info(
@@ -257,8 +372,13 @@ class FeatureAgent:
                 "state": "features_saved" if storage_result else "features_generated",
                 "request": spec.to_dict(),
                 "template_ids": template_ids,
+                "composite_factors": [
+                    composite_factor.to_dict()
+                    for composite_factor in spec.composite_factors
+                ],
                 "factor_columns": list(result.factor_columns),
                 "base_factor_columns": list(result.base_factor_columns),
+                "composite_factor_columns": list(result.composite_factor_columns),
                 "rolling_feature_columns": list(result.rolling_feature_columns),
                 "transformed_factor_columns": list(result.transformed_factor_columns),
                 "rolling_features": list(spec.rolling_features),
@@ -283,6 +403,7 @@ class FeatureAgent:
                 factor_count=len(result.factor_columns),
                 template_count=len(templates),
                 template_ids=template_ids,
+                composite_count=len(spec.composite_factors),
                 storage_stats=storage_stats,
             ),
         )
@@ -302,6 +423,7 @@ class FeatureAgent:
         rolling_feature_names: Sequence[str] = (),
         rolling_windows: Sequence[int] = (),
         rank_transform_names: Sequence[str] = (),
+        composite_factors: Sequence[CompositeFactorSpec] = (),
         quantile_count: int = DEFAULT_QUANTILE_COUNT,
     ) -> FeatureGenerationResult:
         if not templates:
@@ -319,6 +441,22 @@ class FeatureAgent:
             factor_columns.append(factor_column)
 
         base_factor_columns = tuple(factor_columns)
+        composite_factor_columns: tuple[str, ...] = ()
+        if composite_factors:
+            generated_composite_columns = []
+            for composite_factor in composite_factors:
+                factor_column = composite_factor.factor_column
+                if factor_column in frame.columns or factor_column in factor_columns:
+                    msg = f"Composite factor column already exists: {factor_column}."
+                    raise ValueError(msg)
+                frame[factor_column] = _mask_untradable_rows(
+                    _compute_composite_factor(frame, composite_factor),
+                    frame,
+                )
+                factor_columns.append(factor_column)
+                generated_composite_columns.append(factor_column)
+            composite_factor_columns = tuple(generated_composite_columns)
+
         rolling_feature_columns: tuple[str, ...] = ()
         rolling_feature_stats: dict[str, Any] | None = None
         if rolling_feature_names or rolling_windows:
@@ -356,6 +494,7 @@ class FeatureAgent:
             data=frame[list(IDENTITY_COLUMNS) + factor_columns].copy(),
             factor_columns=tuple(factor_columns),
             base_factor_columns=base_factor_columns,
+            composite_factor_columns=composite_factor_columns,
             rolling_feature_columns=rolling_feature_columns,
             transformed_factor_columns=transformed_factor_columns,
             stats=stats,
@@ -378,6 +517,7 @@ class FeatureAgent:
         factor_count: int | None = None,
         template_count: int | None = None,
         template_ids: Sequence[str] | None = None,
+        composite_count: int | None = None,
         storage_stats: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {
@@ -395,6 +535,8 @@ class FeatureAgent:
             metadata["template_count"] = template_count
         if template_ids is not None:
             metadata["template_ids"] = list(template_ids)
+        if composite_count is not None:
+            metadata["composite_count"] = composite_count
         if storage_stats is not None:
             metadata["storage_stats"] = dict(storage_stats)
         return metadata
@@ -612,6 +754,51 @@ def _mask_untradable_rows(values: pd.Series, frame: pd.DataFrame) -> pd.Series:
     return masked.mask(frame[SUSPENSION_COLUMN])
 
 
+def _compute_composite_factor(
+    frame: pd.DataFrame,
+    spec: CompositeFactorSpec,
+) -> pd.Series:
+    if spec.method != DEFAULT_COMPOSITE_METHOD:
+        msg = f"Unsupported composite factor method: {spec.method}."
+        raise ValueError(msg)
+
+    composite = pd.Series(0.0, index=frame.index)
+    for component in spec.components:
+        component_column = component.factor_column
+        if component_column not in frame.columns:
+            msg = (
+                f"Composite factor {spec.name} references missing factor column: "
+                f"{component_column}."
+            )
+            raise ValueError(msg)
+        values = pd.to_numeric(frame[component_column], errors="coerce")
+        normalized_values = _normalize_composite_component(
+            frame,
+            values,
+            spec.normalize,
+        )
+        composite = composite + normalized_values * component.weight
+    return composite.replace([np.inf, -np.inf], np.nan)
+
+
+def _normalize_composite_component(
+    frame: pd.DataFrame,
+    values: pd.Series,
+    normalize: str,
+) -> pd.Series:
+    if normalize == "none":
+        return values
+    grouped = values.groupby(frame["date"], sort=False)
+    if normalize == "rank_pct":
+        return grouped.rank(method="average", pct=True)
+    if normalize == "zscore":
+        mean = grouped.transform("mean")
+        std = grouped.transform("std").replace(0, np.nan)
+        return _safe_divide(values - mean, std)
+    msg = f"Unsupported composite normalizer: {normalize}."
+    raise ValueError(msg)
+
+
 def _feature_stats(frame: pd.DataFrame, factor_columns: Sequence[str]) -> dict[str, Any]:
     by_factor = {}
     for column in factor_columns:
@@ -664,6 +851,26 @@ def _required_path(payload: Mapping[str, Any], key: str) -> Path:
     return Path(value.strip()).expanduser().resolve()
 
 
+def _required_str(payload: Mapping[str, Any], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        msg = f"{key} must be a non-empty string."
+        raise ValueError(msg)
+    return value.strip()
+
+
+def _required_float(payload: Mapping[str, Any], key: str) -> float:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        msg = f"{key} must be a finite number."
+        raise ValueError(msg)
+    number = float(value)
+    if not np.isfinite(number):
+        msg = f"{key} must be a finite number."
+        raise ValueError(msg)
+    return number
+
+
 def _optional_str_sequence(payload: Mapping[str, Any], key: str) -> tuple[str, ...]:
     value = payload.get(key)
     if value is None:
@@ -679,6 +886,31 @@ def _optional_str_sequence(payload: Mapping[str, Any], key: str) -> tuple[str, .
             raise ValueError(msg)
         values.append(item.strip())
     return tuple(dict.fromkeys(values))
+
+
+def _optional_composite_factors(
+    payload: Mapping[str, Any],
+    key: str,
+) -> tuple[CompositeFactorSpec, ...]:
+    value = payload.get(key)
+    if value is None:
+        return ()
+    if isinstance(value, str) or not isinstance(value, Sequence):
+        msg = f"payload.{key} must be a sequence of composite factor objects."
+        raise ValueError(msg)
+
+    composite_factors = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            msg = f"payload.{key} must contain only composite factor objects."
+            raise ValueError(msg)
+        composite_factors.append(CompositeFactorSpec.from_mapping(item))
+
+    factor_columns = [spec.factor_column for spec in composite_factors]
+    if len(factor_columns) != len(set(factor_columns)):
+        msg = "payload.composite_factors contains duplicate factor names."
+        raise ValueError(msg)
+    return tuple(composite_factors)
 
 
 def _optional_int_sequence(payload: Mapping[str, Any], key: str) -> tuple[int, ...]:
@@ -730,3 +962,20 @@ def _optional_str(payload: Mapping[str, Any], key: str, default: str) -> str:
         msg = f"payload.{key} must be a non-empty string."
         raise ValueError(msg)
     return value.strip()
+
+
+def _validate_composite_name(value: str) -> str:
+    if not _COMPOSITE_NAME_PATTERN.fullmatch(value):
+        msg = (
+            "composite factor name must contain only letters, numbers, "
+            "and underscores."
+        )
+        raise ValueError(msg)
+    return value
+
+
+def _factor_column_reference(value: str) -> str:
+    factor = value.strip()
+    if factor.startswith("factor__"):
+        return factor
+    return f"factor__{factor}"

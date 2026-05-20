@@ -8,7 +8,12 @@ import pandas as pd
 import pytest
 
 from agents.factor_templates import FactorTemplate, FactorTemplateLibrary
-from agents.feature_agent import FeatureAgent, FeatureSpec, normalize_aligned_ohlcv
+from agents.feature_agent import (
+    CompositeFactorSpec,
+    FeatureAgent,
+    FeatureSpec,
+    normalize_aligned_ohlcv,
+)
 from core.config import AppConfig
 from core.logging import configure_logging, get_agent_logger
 from core.models import AgentRequest
@@ -62,6 +67,7 @@ def test_feature_spec_normalizes_valid_payload(tmp_path: Path) -> None:
     assert spec.to_dict() == {
         "aligned_data_path": str(path.resolve()),
         "template_ids": ["return_3d", "close_to_open_return"],
+        "composite_factors": [],
         "rolling_features": [],
         "rolling_windows": [],
         "rank_transforms": [],
@@ -121,6 +127,7 @@ def test_feature_agent_generates_selected_factor_values(tmp_path: Path) -> None:
         "factor__close_position_in_range",
     ]
     assert response.output["base_factor_columns"] == response.output["factor_columns"]
+    assert response.output["composite_factor_columns"] == []
     assert response.output["rolling_feature_columns"] == []
     assert response.output["transformed_factor_columns"] == []
     assert response.output["rolling_feature_stats"] == {}
@@ -196,6 +203,8 @@ def test_feature_agent_saves_factor_matrix_when_requested(tmp_path: Path) -> Non
     assert manifest["context"]["base_factor_columns"] == [
         "factor__close_to_open_return"
     ]
+    assert manifest["context"]["composite_factor_columns"] == []
+    assert manifest["context"]["composite_factor_definitions"] == []
     assert manifest["storage"]["matrix_path"] == str(matrix_path)
     assert "FeatureAgent | save_factors | success" in stream.getvalue()
 
@@ -224,6 +233,121 @@ def test_feature_agent_generate_features_preserves_expected_values() -> None:
         & (result.data["date"] == pd.Timestamp("2024-01-04"))
     ].iloc[0]
     assert pd.isna(suspended_row["factor__close_to_open_return"])
+
+
+def test_feature_agent_generates_weighted_composite_factor() -> None:
+    agent = FeatureAgent()
+    library = FactorTemplateLibrary()
+    composite = CompositeFactorSpec.from_mapping(
+        {
+            "name": "momentum_blend",
+            "normalize": "rank_pct",
+            "components": [
+                {"factor": "return_3d", "weight": 0.6},
+                {"factor": "close_to_open_return", "weight": 0.4},
+            ],
+        }
+    )
+
+    result = agent.generate_features(
+        _aligned_frame(),
+        [library.get("return_3d"), library.get("close_to_open_return")],
+        composite_factors=[composite],
+    )
+
+    assert result.factor_columns == (
+        "factor__return_3d",
+        "factor__close_to_open_return",
+        "factor__momentum_blend",
+    )
+    assert result.composite_factor_columns == ("factor__momentum_blend",)
+
+    strong_row = result.data[
+        (result.data["symbol"] == "000001")
+        & (result.data["date"] == pd.Timestamp("2024-01-06"))
+    ].iloc[0]
+    weak_row = result.data[
+        (result.data["symbol"] == "000002")
+        & (result.data["date"] == pd.Timestamp("2024-01-06"))
+    ].iloc[0]
+    assert strong_row["factor__momentum_blend"] == pytest.approx(1.0)
+    assert weak_row["factor__momentum_blend"] == pytest.approx(0.5)
+
+
+def test_feature_agent_saves_composite_factor_definition(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path)
+    agent = FeatureAgent(config=_config(tmp_path))
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "aligned_data_path": str(path),
+                "template_ids": ["return_3d", "close_to_open_return"],
+                "composite_factors": [
+                    {
+                        "name": "momentum_blend",
+                        "normalize": "rank_pct",
+                        "components": [
+                            {"factor": "return_3d", "weight": 0.6},
+                            {"factor": "close_to_open_return", "weight": 0.4},
+                        ],
+                    }
+                ],
+                "save_factors": True,
+                "preview_rows": 0,
+            }
+        )
+    )
+
+    assert response.status == "success"
+    assert response.output["composite_factor_columns"] == ["factor__momentum_blend"]
+    assert response.output["factor_count"] == 3
+
+    manifest_path = Path(response.output["storage_stats"]["manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["context"]["composite_factor_columns"] == [
+        "factor__momentum_blend"
+    ]
+    assert manifest["context"]["composite_factor_definitions"] == [
+        {
+            "name": "momentum_blend",
+            "factor_column": "factor__momentum_blend",
+            "method": "weighted_sum",
+            "normalize": "rank_pct",
+            "components": [
+                {"factor": "return_3d", "weight": 0.6},
+                {"factor": "close_to_open_return", "weight": 0.4},
+            ],
+        }
+    ]
+
+
+def test_feature_agent_rejects_composite_missing_component(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path)
+    agent = FeatureAgent()
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "aligned_data_path": str(path),
+                "template_ids": ["close_to_open_return"],
+                "composite_factors": [
+                    {
+                        "name": "bad_blend",
+                        "components": [
+                            {"factor": "close_to_open_return", "weight": 1.0},
+                            {"factor": "missing_factor", "weight": 1.0},
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+
+    assert response.status == "error"
+    assert "references missing factor column: factor__missing_factor" in str(
+        response.error
+    )
 
 
 def test_feature_agent_applies_rolling_features(tmp_path: Path) -> None:

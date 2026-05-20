@@ -29,6 +29,8 @@ class FactorStorageContext:
     feature_stats: Mapping[str, Any]
     rolling_feature_stats: Mapping[str, Any]
     rank_transform_stats: Mapping[str, Any]
+    composite_factor_columns: tuple[str, ...] = ()
+    composite_factor_definitions: tuple[Mapping[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -37,6 +39,11 @@ class FactorStorageContext:
             "source_aligned_data_path": self.source_aligned_data_path,
             "template_ids": list(self.template_ids),
             "base_factor_columns": list(self.base_factor_columns),
+            "composite_factor_columns": list(self.composite_factor_columns),
+            "composite_factor_definitions": [
+                dict(definition)
+                for definition in self.composite_factor_definitions
+            ],
             "rolling_feature_columns": list(self.rolling_feature_columns),
             "transformed_factor_columns": list(self.transformed_factor_columns),
             "feature_stats": dict(self.feature_stats),

@@ -18,7 +18,7 @@ from agents.daily_ranking import (
     DEFAULT_RANKING_TOP_N,
     DailyRankingAgent,
 )
-from agents.feature_agent import FeatureAgent
+from agents.feature_agent import CompositeFactorSpec, FeatureAgent
 from agents.market_data_provider import MarketDataProvider
 from agents.memory_agent import MemoryAgent
 from agents.report_agent import ReportAgent
@@ -88,11 +88,13 @@ class DailyResearchSpec:
     retry_backoff_sec: float = 0.5
     symbol_sleep_sec: float = 0.0
     template_ids: tuple[str, ...] = DEFAULT_DAILY_TEMPLATE_IDS
+    composite_factors: tuple[CompositeFactorSpec, ...] = ()
     rolling_features: tuple[str, ...] = ()
     rolling_windows: tuple[int, ...] = ()
     rank_transforms: tuple[str, ...] = ()
     factor_set_name: str = "daily_research"
     factor_column: str | None = None
+    allow_implicit_factor_column: bool = False
     factor_direction: str = DEFAULT_DAILY_FACTOR_DIRECTION
     forward_return_days: int = DEFAULT_DAILY_FORWARD_RETURN_DAYS
     quantile_count: int = DEFAULT_DAILY_QUANTILE_COUNT
@@ -162,11 +164,17 @@ class DailyResearchSpec:
                 "template_ids",
                 default=DEFAULT_DAILY_TEMPLATE_IDS,
             ),
+            composite_factors=_optional_composite_factors(raw, "composite_factors"),
             rolling_features=_optional_str_sequence(raw, "rolling_features"),
             rolling_windows=_optional_int_sequence(raw, "rolling_windows"),
             rank_transforms=_optional_str_sequence(raw, "rank_transforms"),
             factor_set_name=_optional_str(raw, "factor_set_name", "daily_research"),
             factor_column=_optional_nullable_str(raw, "factor_column"),
+            allow_implicit_factor_column=_optional_bool(
+                raw,
+                "allow_implicit_factor_column",
+                False,
+            ),
             factor_direction=_optional_str(
                 raw,
                 "factor_direction",
@@ -248,11 +256,16 @@ class DailyResearchSpec:
             "retry_backoff_sec": self.retry_backoff_sec,
             "symbol_sleep_sec": self.symbol_sleep_sec,
             "template_ids": list(self.template_ids),
+            "composite_factors": [
+                composite_factor.to_dict()
+                for composite_factor in self.composite_factors
+            ],
             "rolling_features": list(self.rolling_features),
             "rolling_windows": list(self.rolling_windows),
             "rank_transforms": list(self.rank_transforms),
             "factor_set_name": self.factor_set_name,
             "factor_column": self.factor_column,
+            "allow_implicit_factor_column": self.allow_implicit_factor_column,
             "factor_direction": self.factor_direction,
             "forward_return_days": self.forward_return_days,
             "quantile_count": self.quantile_count,
@@ -361,6 +374,16 @@ def run_daily_research(
             stage="feature",
         )
         factor_column = _selected_factor_column(spec, feature_response)
+        stages["feature"]["summary"]["selected_factor_column"] = factor_column
+        stages["feature"]["summary"]["factor_selection_policy"] = (
+            "configured"
+            if spec.factor_column
+            else (
+                "implicit_first_factor"
+                if spec.allow_implicit_factor_column
+                else "single_factor"
+            )
+        )
         result_json_path = run_dir / "backtest_result.json"
         backtest_response = BacktestAgent().run(
             AgentRequest.create(
@@ -572,6 +595,10 @@ def _feature_payload(spec: DailyResearchSpec, aligned_data_path: Path) -> dict[s
     return {
         "aligned_data_path": str(aligned_data_path),
         "template_ids": list(spec.template_ids),
+        "composite_factors": [
+            composite_factor.to_dict()
+            for composite_factor in spec.composite_factors
+        ],
         "rolling_features": list(spec.rolling_features),
         "rolling_windows": list(spec.rolling_windows),
         "rank_transforms": list(spec.rank_transforms),
@@ -604,17 +631,34 @@ def _backtest_payload(
 
 
 def _selected_factor_column(spec: DailyResearchSpec, response: AgentResponse) -> str:
-    if spec.factor_column:
-        return spec.factor_column
     factor_columns = response.output.get("factor_columns")
     if not isinstance(factor_columns, list) or not factor_columns:
         msg = "FeatureAgent output has no factor_columns."
         raise ValueError(msg)
-    first = factor_columns[0]
-    if not isinstance(first, str) or not first:
-        msg = "FeatureAgent factor_columns must contain strings."
+    if not all(isinstance(column, str) and column for column in factor_columns):
+        msg = "FeatureAgent factor_columns must contain non-empty strings."
         raise ValueError(msg)
-    return first
+    if spec.factor_column:
+        if spec.factor_column not in factor_columns:
+            msg = (
+                f"Configured factor_column {spec.factor_column} is not in "
+                f"FeatureAgent factor_columns: {', '.join(factor_columns)}."
+            )
+            raise ValueError(msg)
+        return spec.factor_column
+    if len(factor_columns) == 1:
+        return factor_columns[0]
+    if spec.allow_implicit_factor_column:
+        return factor_columns[0]
+
+    msg = (
+        "config.factor_column is required when FeatureAgent generates multiple "
+        "factor columns. Multiple template_ids are separate signals and are not "
+        "an automatic composite factor. Set factor_column to one generated "
+        "column, define composite_factors and select that factor, or set "
+        "allow_implicit_factor_column=true to explicitly use the first column."
+    )
+    raise ValueError(msg)
 
 
 def _factor_metadata(spec: DailyResearchSpec, factor_column: str) -> dict[str, Any]:
@@ -696,6 +740,9 @@ def _feature_stage(response: AgentResponse) -> dict[str, Any]:
         },
         "summary": {
             "factor_columns": output.get("factor_columns"),
+            "base_factor_columns": output.get("base_factor_columns"),
+            "composite_factor_columns": output.get("composite_factor_columns"),
+            "composite_factors": output.get("composite_factors"),
             "row_count": output.get("row_count"),
             "factor_count": output.get("factor_count"),
             "feature_stats": output.get("feature_stats"),
@@ -824,6 +871,8 @@ def _summary(
         "symbols": data.get("symbols"),
         "failed_symbols": data.get("failed_symbols"),
         "factor_columns": feature.get("factor_columns"),
+        "selected_factor_column": feature.get("selected_factor_column"),
+        "factor_selection_policy": feature.get("factor_selection_policy"),
         "factor_column": backtest.get("factor_column"),
         "benchmark_status": backtest.get("benchmark_status"),
         "failed_benchmark_tests": backtest.get("failed_benchmark_tests"),
@@ -1047,6 +1096,23 @@ def _optional_str_sequence(
             raise ValueError(msg)
         normalized.append(item.strip())
     return tuple(dict.fromkeys(normalized))
+
+
+def _optional_composite_factors(
+    payload: Mapping[str, Any],
+    key: str,
+) -> tuple[CompositeFactorSpec, ...]:
+    value = payload.get(key, [])
+    if not isinstance(value, Sequence) or isinstance(value, str):
+        msg = f"config.{key} must be a list of composite factor objects."
+        raise ValueError(msg)
+    composite_factors = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            msg = f"config.{key} must contain only composite factor objects."
+            raise ValueError(msg)
+        composite_factors.append(CompositeFactorSpec.from_mapping(item))
+    return tuple(composite_factors)
 
 
 def _optional_int_sequence(payload: Mapping[str, Any], key: str) -> tuple[int, ...]:

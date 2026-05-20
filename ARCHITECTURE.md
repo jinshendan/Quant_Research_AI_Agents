@@ -428,9 +428,12 @@ Implemented in `quant-agent/`:
 -   validated `FeatureSpec` request model
 -   aligned OHLCV CSV loading and normalization
 -   template selection through `FactorTemplateLibrary`
+-   optional `composite_factors` definitions for weighted multi-factor signals
 -   pandas execution paths for all current Day 9 default templates
 -   per-symbol rolling, delay, percent-change, z-score, drawdown, breakout, and
     candle-position calculations
+-   cross-sectional `rank_pct` or `zscore` normalization before composite
+    factor construction
 -   masking of `is_suspended_or_missing` rows without forward-filling prices
 -   factor matrix preview and per-factor valid/missing value statistics
 -   standardized `AgentRequest` and `AgentResponse` envelopes
@@ -445,6 +448,16 @@ Current FeatureAgent payload:
 {
   "aligned_data_path": "data/processed/aligned_ohlcv_akshare_CSI500_daily_none_20200101_20251231.csv",
   "template_ids": ["return_5d", "volume_ratio_5d_20d"],
+  "composite_factors": [
+    {
+      "name": "momentum_volume_blend",
+      "normalize": "rank_pct",
+      "components": [
+        {"factor": "return_5d", "weight": 0.6},
+        {"factor": "volume_ratio_5d_20d", "weight": 0.4}
+      ]
+    }
+  ],
   "preview_rows": 5
 }
 ```
@@ -455,16 +468,18 @@ Current FeatureAgent output:
 state = features_generated
 template_ids
 factor_columns
+base_factor_columns
+composite_factor_columns
 row_count
 factor_count
 preview
 feature_stats
 ```
 
-Day 10 computes factor values in memory only. It does not yet generate the
-first large factor batch, add ranking transforms, expand rolling-window feature
-families, save factor matrices, or evaluate performance. Those remain scoped to
-Days 11-14 and Week 3.
+Composite factors are generated as ordinary `factor__...` columns and can be
+used by downstream backtests and rankings by explicitly selecting their
+`factor_column`. Ranking transforms, rolling features, persistence, and
+evaluation are implemented in later sections below.
 
 ## Day 11 --- First 50 Factor Candidates
 
@@ -1351,6 +1366,12 @@ Implemented in `quant-agent/`:
 -   per-run output directory under `output_dir/run_id/`
 -   `daily_research_manifest.json` with schema version, stage summaries,
     artifact paths, request echo, elapsed time, status, and error details
+-   explicit selected factor tracking through `summary.selected_factor_column`
+    and `stages.feature.summary.selected_factor_column`
+-   mandatory `config.factor_column` when FeatureAgent emits multiple factor
+    columns, unless `allow_implicit_factor_column=true` is set
+-   `composite_factors` passthrough to FeatureAgent for weighted multi-factor
+    daily research signals
 -   terminal summary with run status, manifest path, factor column, benchmark
     status, failed benchmark tests, critic verdict, critic severity, memory ID,
     ranking paths, and report path
