@@ -29,6 +29,12 @@ from agents.akshare_smoke import (
     SmokeDiagnostic,
     run_akshare_smoke,
 )
+from agents.critic_agent import (
+    CriticAgent,
+    CriticSpec,
+    FactorCritique,
+    build_factor_critique,
+)
 from agents.data_agent import DataAgent, MarketDataSpec
 from agents.daily_ranking import (
     DailyRankingAgent,
@@ -154,6 +160,8 @@ __all__ = [
     "BacktestResultJson",
     "BacktestSpec",
     "CalendarAlignmentResult",
+    "CriticAgent",
+    "CriticSpec",
     "DataAgent",
     "DailyRankingAgent",
     "DailyRankingBuildResult",
@@ -164,6 +172,7 @@ __all__ = [
     "DuckDBMarketDataStore",
     "DrawdownResult",
     "FactorBatchResult",
+    "FactorCritique",
     "FactorCandidateGenerator",
     "FactorFamily",
     "FactorGenerationAgent",
@@ -224,6 +233,7 @@ __all__ = [
     "build_factor_memory_record",
     "build_factor_wiki_markdown",
     "build_daily_stock_ranking",
+    "build_factor_critique",
     "build_report_draft",
     "clean_ohlcv",
     "compute_drawdown",

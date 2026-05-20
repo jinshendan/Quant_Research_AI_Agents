@@ -129,12 +129,15 @@ def test_run_daily_research_writes_manifest_and_artifacts(tmp_path: Path) -> Non
         "data",
         "feature",
         "backtest",
+        "critic",
         "ranking",
         "memory",
         "report",
     }
     assert manifest["summary"]["factor_column"] == "factor__close_to_open_return"
     assert manifest["summary"]["benchmark_status"] == "passed"
+    assert manifest["summary"]["critic_verdict"] == "track"
+    assert manifest["summary"]["critic_severity"] == "low"
     assert manifest["summary"]["memory_id"].startswith("factor-memory-")
     assert manifest["summary"]["top_ranked_symbols"] == ["000006", "000005", "000004"]
     assert manifest["request"]["transaction_costs"]["enabled"] is True

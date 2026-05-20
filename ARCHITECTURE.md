@@ -1345,14 +1345,15 @@ Implemented in `quant-agent/`:
 
 -   `DailyResearchSpec` for validating `.json` or `.toml` pipeline configs
 -   `run_daily_research(...)` for orchestrating:
-    `DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent`
+    `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent`
 -   `scripts/run_daily_research.py` CLI for running the pipeline from a config
     file
 -   per-run output directory under `output_dir/run_id/`
 -   `daily_research_manifest.json` with schema version, stage summaries,
     artifact paths, request echo, elapsed time, status, and error details
 -   terminal summary with run status, manifest path, factor column, benchmark
-    status, failed benchmark tests, memory ID, ranking paths, and report path
+    status, failed benchmark tests, critic verdict, critic severity, memory ID,
+    ranking paths, and report path
 -   offline tests for config loading, success manifest generation, and error
     manifest generation
 
@@ -1478,6 +1479,38 @@ research comparability. It does not model order-book depth, partial fills,
 broker-specific minimum commission, intraday execution, or real short-selling
 availability. For A-share self-use, those remain manual checks or future
 PortfolioAgent/DecisionAgent work.
+
+## CriticAgent
+
+Implemented in `quant-agent/`:
+
+-   `CriticAgent` in `agents/critic_agent.py`
+-   `CriticSpec` request validation for either `payload.result_json` or
+    `payload.result_json_path`
+-   `build_factor_critique(...)` for deterministic review of a benchmarked
+    BacktestAgent result JSON
+-   verdict contract:
+    -   `track`: quality gates pass; continue tracking
+    -   `revise`: failures are present but not severe enough to reject
+    -   `reject_for_now`: multiple core quality gates fail
+-   severity contract: `low`, `medium`, or `high`
+-   failure explanations for sample size, IC/RankIC dates, average leg count,
+    mean IC, mean RankIC, net Sharpe, net total return, and max drawdown
+-   action items that are human-readable and language-aware
+-   integration into daily research after BacktestAgent and before
+    DailyRankingAgent
+-   critic summary fields in `daily_research_manifest.json` and terminal
+    summary:
+    -   `critic_verdict`
+    -   `critic_severity`
+    -   `critic_summary`
+-   MemoryAgent receives the critic summary as `failure_reason` when the factor
+    is not accepted for tracking
+
+CriticAgent is intentionally not a trading decision engine. It does not output
+buy/sell/hold instructions. Its job is to prevent a generated ranking or report
+from being misread as usable trading evidence when the underlying factor quality
+is weak. DecisionAgent remains the next layer for watchlist-level decisions.
 
 ## Project Output Language
 

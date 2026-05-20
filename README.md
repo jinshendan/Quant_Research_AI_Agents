@@ -45,6 +45,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
 | 交易成本模型 | 已实现 | 佣金、印花税、过户费、滑点、换手率、gross/net 指标 |
 | Benchmark tests | 已实现 | 对回测结果做确定性质量门槛检查，默认检查样本数、RankIC、净夏普、净收益、回撤和分组股票数 |
+| CriticAgent | 已实现 | 将 benchmark 失败项翻译成 track/revise/reject 审查结论 |
 | MemoryAgent | 已实现 | 保存因子研究记录到 JSONL |
 | FAISS 语义检索 | 已实现 | 对因子记忆做本地向量索引和搜索 |
 | Factor wiki | 已实现 | 自动生成因子知识库 Markdown |
@@ -67,6 +68,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | 生成候选因子定义 |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | 统一管理 A 股交易成本假设和换手成本估算 |
+| CriticAgent | `quant-agent/agents/critic_agent.py` | 审查回测质量并解释失败原因 |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | 保存因子研究记录和 FAISS 索引 |
 | ReportAgent | `quant-agent/agents/report_agent.py` | 生成 Markdown 研究报告 |
 | A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | 统一生成 A 股交易约束标签 |
@@ -94,6 +96,7 @@ Market Data
   -> HypothesisAgent
   -> FeatureAgent / FactorGenerationAgent
   -> BacktestAgent
+  -> CriticAgent
   -> MemoryAgent
   -> ReportAgent
   -> Streamlit Dashboard
@@ -211,8 +214,8 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
 }
 ```
 
-该脚本会依次运行 `DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent
--> MemoryAgent -> ReportAgent`，并在 `output_dir/run_id/daily_research_manifest.json` 保存
+该脚本会依次运行 `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent
+-> DailyRankingAgent -> MemoryAgent -> ReportAgent`，并在 `output_dir/run_id/daily_research_manifest.json` 保存
 本次运行清单和关键 artifact 路径。
 同时会生成每日候选股排名：
 
@@ -391,10 +394,10 @@ print(report_response.output["report_path"])
 
 | 优先级 | 计划 |
 | --- | --- |
-| P0 | 构建 CriticAgent，解释低质量因子和失败 benchmark |
+| P0 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
 | P1 | 加入样本外验证、walk-forward validation、因子稳健性检查 |
 | P1 | 加入数据泄漏和幸存者偏差检查 |
-| P2 | 构建 CriticAgent、PortfolioAgent、ExperimentAgent |
+| P2 | 构建 DecisionAgent、PortfolioAgent、ExperimentAgent |
 | P3 | 支持 watchlist、dashboard 过滤器、配置模板 |
 | P4 | 增加每日研究 checklist、paper trading log、报告安全提示 |
 
@@ -444,6 +447,7 @@ for real-money trading decisions.
 | BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
 | Transaction cost model | Done | Commission, stamp duty, transfer fee, slippage, turnover, gross/net metrics |
 | Benchmark tests | Done | Deterministic gates over sample size, RankIC, net Sharpe, net return, drawdown, and average leg count |
+| CriticAgent | Done | Converts failed benchmark gates into track/revise/reject critiques |
 | MemoryAgent | Done | JSONL factor research memory |
 | FAISS search | Done | Local semantic search over factor memory |
 | Factor wiki | Done | Markdown factor knowledge base |
@@ -466,6 +470,7 @@ for real-money trading decisions.
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | Generate candidate factor definitions |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | Centralize A-share cost assumptions and turnover cost estimates |
+| CriticAgent | `quant-agent/agents/critic_agent.py` | Review backtest quality and explain failed gates |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | Store factor research records and FAISS indexes |
 | ReportAgent | `quant-agent/agents/report_agent.py` | Generate Markdown research reports |
 | A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | Generate reusable A-share trading-constraint flags |
@@ -582,8 +587,8 @@ Minimal JSON config:
 }
 ```
 
-The script runs `DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent
--> MemoryAgent -> ReportAgent` and writes
+The script runs `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent
+-> DailyRankingAgent -> MemoryAgent -> ReportAgent` and writes
 `output_dir/run_id/daily_research_manifest.json` with stage summaries and
 artifact paths.
 It also writes:
@@ -614,7 +619,7 @@ python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.p
 The current practical flow is:
 
 ```text
-DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent -> Dashboard
+DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent -> Dashboard
 ```
 
 Example data request:
@@ -714,10 +719,10 @@ print(response.output["cost_stats"])
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- build CriticAgent for low-quality factor review
+- build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions
 - add out-of-sample and walk-forward validation
 - add factor robustness, leakage, and survivorship-bias checks
-- build CriticAgent, PortfolioAgent, and ExperimentAgent
+- build DecisionAgent, PortfolioAgent, and ExperimentAgent
 - improve dashboard filters and watchlist workflows
 
 ### Safety Note

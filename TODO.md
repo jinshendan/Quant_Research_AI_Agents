@@ -29,7 +29,7 @@
 - [x] 增加 daily research pipeline
   - [x] 创建 `scripts/run_daily_research.py`
   - [x] 支持配置 universe、symbols、日期范围、因子集合和输出目录
-  - [x] 串联 `DataAgent -> FeatureAgent -> BacktestAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent`
+  - [x] 串联 `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent`
   - [x] 保存每日运行 manifest 和所有 artifact 路径
   - [x] 输出简洁终端摘要
 
@@ -95,11 +95,11 @@
 
 ## P2 --- 让系统能辅助“是否入场/是否卖出”
 
-- [ ] 构建 CriticAgent
-  - [ ] 审查每次回测是否过拟合、样本太少或指标不稳定
-  - [ ] 解释因子可能失效的原因
-  - [ ] 判断因子是继续跟踪、需要修改，还是应该拒绝
-  - [ ] 对“排名靠前但历史回测很差”的股票给出明确警告
+- [x] 构建 CriticAgent
+  - [x] 审查每次回测是否样本太少、分组太薄或指标不稳定
+  - [x] 解释因子可能失效的原因
+  - [x] 判断因子是继续跟踪、需要修改，还是应该拒绝
+  - [x] 对“排名靠前但历史回测很差”的情况给出明确警告
 
 - [ ] 构建 DecisionAgent
   - [ ] 输入 daily ranking、交易约束、回测质量、风险指标和最近走势
@@ -199,9 +199,9 @@
 
 优先继续 P0：
 
-1. 构建 CriticAgent，用来指出“排名靠前但因子质量差”的情况。
-2. 构建 DecisionAgent，把银轮股份这类关注股转成可读的“观察 / 可小仓试错 / 暂不介入 / 考虑退出”研究结论。
-3. 增加样本外验证，避免只依赖样本内回测。
-4. 增加 watchlist 配置模板，让银轮股份这类关注股更容易复用。
+1. 构建 DecisionAgent，把银轮股份这类关注股转成可读的“观察 / 可小仓试错 / 暂不介入 / 考虑退出”研究结论。
+2. 增加样本外验证，避免只依赖样本内回测。
+3. 增加 watchlist 配置模板，让银轮股份这类关注股更容易复用。
+4. 增加入场/卖出规则研究，把排名和风控条件转成可执行的观察规则。
 
 这条路线最直接服务你的目标：不是产品化，而是每天辅助你做个人股票研究和交易前判断。

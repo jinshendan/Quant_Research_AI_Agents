@@ -12,6 +12,7 @@ from typing import Any
 
 from agents.ashare_trading_constraints import AshareTradingConstraintSpec
 from agents.backtest_agent import BacktestAgent, default_benchmark_thresholds
+from agents.critic_agent import CriticAgent
 from agents.data_agent import DataAgent
 from agents.daily_ranking import (
     DEFAULT_RANKING_TOP_N,
@@ -54,6 +55,9 @@ SUMMARY_LABELS = {
         en="failed_benchmark_tests",
         zh="失败基准项",
     ),
+    "critic_verdict": LocalizedText(en="critic_verdict", zh="审查结论"),
+    "critic_severity": LocalizedText(en="critic_severity", zh="审查严重度"),
+    "critic_summary": LocalizedText(en="critic_summary", zh="审查摘要"),
     "memory_id": LocalizedText(en="memory_id", zh="记忆 ID"),
     "top_ranked_symbols": LocalizedText(en="top_ranked_symbols", zh="排名靠前股票"),
     "ranking_path": LocalizedText(en="ranking_path", zh="排名 CSV 路径"),
@@ -373,6 +377,24 @@ def run_daily_research(
         stages["backtest"] = _backtest_stage(backtest_response)
         artifacts.update(stages["backtest"]["artifacts"])
 
+        result_json_path = _required_output_path(
+            backtest_response,
+            "result_json_path",
+            stage="backtest",
+        )
+        critic_response = CriticAgent().run(
+            AgentRequest.create(
+                {
+                    "result_json_path": str(result_json_path),
+                    "output_language": spec.output_language,
+                },
+                task_id=f"{run_id}-critic",
+            )
+        )
+        _require_success(critic_response, "critic")
+        stages["critic"] = _critic_stage(critic_response)
+        artifacts.update(stages["critic"]["artifacts"])
+
         factor_matrix_path = _required_nested_output_path(
             feature_response,
             "storage_stats",
@@ -401,12 +423,10 @@ def run_daily_research(
         stages["ranking"] = _ranking_stage(ranking_response)
         artifacts.update(stages["ranking"]["artifacts"])
 
-        result_json_path = _required_output_path(
-            backtest_response,
-            "result_json_path",
-            stage="backtest",
+        factor_metadata = _factor_metadata_with_critic(
+            _factor_metadata(spec, factor_column),
+            critic_response,
         )
-        factor_metadata = _factor_metadata(spec, factor_column)
         memory_response = MemoryAgent(config=config).run(
             AgentRequest.create(
                 {
@@ -513,6 +533,9 @@ def format_daily_research_summary(
         "factor_column",
         "benchmark_status",
         "failed_benchmark_tests",
+        "critic_verdict",
+        "critic_severity",
+        "critic_summary",
         "memory_id",
         "top_ranked_symbols",
         "ranking_path",
@@ -606,6 +629,22 @@ def _factor_metadata(spec: DailyResearchSpec, factor_column: str) -> dict[str, A
     )
     metadata.setdefault("universe", spec.universe)
     return metadata
+
+
+def _factor_metadata_with_critic(
+    metadata: Mapping[str, Any],
+    response: AgentResponse,
+) -> dict[str, Any]:
+    result = dict(metadata)
+    critique = response.output.get("critique")
+    if not isinstance(critique, Mapping):
+        return result
+    verdict = critique.get("verdict")
+    if verdict != "track" and "failure_reason" not in result:
+        summary_text = critique.get("summary_text")
+        if isinstance(summary_text, str) and summary_text.strip():
+            result["failure_reason"] = summary_text.strip()
+    return result
 
 
 def _require_success(response: AgentResponse, stage: str) -> None:
@@ -716,6 +755,21 @@ def _memory_stage(response: AgentResponse) -> dict[str, Any]:
     }
 
 
+def _critic_stage(response: AgentResponse) -> dict[str, Any]:
+    output = response.output
+    return {
+        "status": response.status,
+        "task_id": response.metadata.get("task_id"),
+        "artifacts": {},
+        "summary": {
+            "verdict": output.get("verdict"),
+            "severity": output.get("severity"),
+            "summary_text": output.get("summary_text"),
+            "failed_tests": output.get("failed_tests"),
+        },
+    }
+
+
 def _ranking_stage(response: AgentResponse) -> dict[str, Any]:
     output = response.output
     return {
@@ -761,6 +815,7 @@ def _summary(
     data = _stage_summary(stages, "data")
     feature = _stage_summary(stages, "feature")
     backtest = _stage_summary(stages, "backtest")
+    critic = _stage_summary(stages, "critic")
     ranking = _stage_summary(stages, "ranking")
     ranking_artifacts = _stage_artifacts(stages, "ranking")
     memory = _stage_summary(stages, "memory")
@@ -772,6 +827,9 @@ def _summary(
         "factor_column": backtest.get("factor_column"),
         "benchmark_status": backtest.get("benchmark_status"),
         "failed_benchmark_tests": backtest.get("failed_benchmark_tests"),
+        "critic_verdict": critic.get("verdict"),
+        "critic_severity": critic.get("severity"),
+        "critic_summary": critic.get("summary_text"),
         "memory_id": memory.get("memory_id"),
         "top_ranked_symbols": ranking.get("top_symbols"),
         "ranking_path": ranking_artifacts.get("ranking_path"),
