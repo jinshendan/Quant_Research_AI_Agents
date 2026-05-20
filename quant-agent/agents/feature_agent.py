@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +13,12 @@ from agents.factor_rolling import (
     RollingFeatureSpec,
     apply_rolling_features,
     normalize_rolling_windows,
+)
+from agents.factor_registry import (
+    DEFAULT_COMPOSITE_METHOD,
+    CompositeFactorSpec,
+    FactorDefinition,
+    FactorDefinitionRegistry,
 )
 from agents.factor_store import (
     DEFAULT_FACTOR_SET_NAME,
@@ -36,106 +41,8 @@ IDENTITY_COLUMNS = ("date", "symbol")
 SUSPENSION_COLUMN = "is_suspended_or_missing"
 DEFAULT_PREVIEW_ROWS = 5
 MAX_PREVIEW_ROWS = 50
-DEFAULT_COMPOSITE_METHOD = "weighted_sum"
-DEFAULT_COMPOSITE_NORMALIZE = "none"
-SUPPORTED_COMPOSITE_METHODS = frozenset({DEFAULT_COMPOSITE_METHOD})
-SUPPORTED_COMPOSITE_NORMALIZERS = frozenset({"none", "rank_pct", "zscore"})
-_COMPOSITE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 
 FactorExecutor = Callable[[pd.DataFrame], pd.Series]
-
-
-@dataclass(frozen=True, slots=True)
-class CompositeFactorComponent:
-    """One weighted input into a composite factor."""
-
-    factor: str
-    weight: float
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> CompositeFactorComponent:
-        factor = _required_str(payload, "factor")
-        weight = _required_float(payload, "weight")
-        return cls(factor=factor, weight=weight)
-
-    @property
-    def factor_column(self) -> str:
-        return _factor_column_reference(self.factor)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"factor": self.factor, "weight": self.weight}
-
-
-@dataclass(frozen=True, slots=True)
-class CompositeFactorSpec:
-    """Validated definition for a weighted composite factor."""
-
-    name: str
-    components: tuple[CompositeFactorComponent, ...]
-    method: str = DEFAULT_COMPOSITE_METHOD
-    normalize: str = DEFAULT_COMPOSITE_NORMALIZE
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> CompositeFactorSpec:
-        name = _validate_composite_name(_required_str(payload, "name"))
-        method = _optional_str(payload, "method", DEFAULT_COMPOSITE_METHOD)
-        if method not in SUPPORTED_COMPOSITE_METHODS:
-            msg = (
-                f"composite factor {name} method must be one of: "
-                f"{', '.join(sorted(SUPPORTED_COMPOSITE_METHODS))}."
-            )
-            raise ValueError(msg)
-        normalize = _optional_str(payload, "normalize", DEFAULT_COMPOSITE_NORMALIZE)
-        if normalize not in SUPPORTED_COMPOSITE_NORMALIZERS:
-            msg = (
-                f"composite factor {name} normalize must be one of: "
-                f"{', '.join(sorted(SUPPORTED_COMPOSITE_NORMALIZERS))}."
-            )
-            raise ValueError(msg)
-
-        raw_components = payload.get("components")
-        if (
-            isinstance(raw_components, str)
-            or not isinstance(raw_components, Sequence)
-            or not raw_components
-        ):
-            msg = f"composite factor {name} components must be a non-empty sequence."
-            raise ValueError(msg)
-
-        components = []
-        for item in raw_components:
-            if not isinstance(item, Mapping):
-                msg = f"composite factor {name} components must contain objects."
-                raise ValueError(msg)
-            components.append(CompositeFactorComponent.from_mapping(item))
-
-        component_refs = [component.factor_column for component in components]
-        if len(component_refs) != len(set(component_refs)):
-            msg = f"composite factor {name} contains duplicate components."
-            raise ValueError(msg)
-        if not any(component.weight != 0.0 for component in components):
-            msg = f"composite factor {name} must contain at least one non-zero weight."
-            raise ValueError(msg)
-
-        return cls(
-            name=name,
-            components=tuple(components),
-            method=method,
-            normalize=normalize,
-        )
-
-    @property
-    def factor_column(self) -> str:
-        return f"factor__{self.name}"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "factor_column": self.factor_column,
-            "method": self.method,
-            "normalize": self.normalize,
-            "components": [component.to_dict() for component in self.components],
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +136,7 @@ class FeatureGenerationResult:
     composite_factor_columns: tuple[str, ...]
     rolling_feature_columns: tuple[str, ...]
     transformed_factor_columns: tuple[str, ...]
+    factor_definitions: tuple[FactorDefinition, ...]
     stats: dict[str, Any]
     rolling_feature_stats: dict[str, Any] | None = None
     rank_transform_stats: dict[str, Any] | None = None
@@ -290,7 +198,7 @@ class FeatureAgent:
                 composite_factors=spec.composite_factors,
                 quantile_count=spec.quantile_count,
             )
-        except ValueError as exc:
+        except (KeyError, ValueError) as exc:
             elapsed = perf_counter() - started_at
             self.logger.warning(
                 "Feature generation failed.",
@@ -334,6 +242,10 @@ class FeatureAgent:
                         composite_factor_definitions=tuple(
                             composite_factor.to_dict()
                             for composite_factor in spec.composite_factors
+                        ),
+                        factor_definitions=tuple(
+                            factor_definition.to_dict()
+                            for factor_definition in result.factor_definitions
                         ),
                         rolling_feature_columns=result.rolling_feature_columns,
                         transformed_factor_columns=result.transformed_factor_columns,
@@ -381,6 +293,10 @@ class FeatureAgent:
                 "composite_factor_columns": list(result.composite_factor_columns),
                 "rolling_feature_columns": list(result.rolling_feature_columns),
                 "transformed_factor_columns": list(result.transformed_factor_columns),
+                "factor_definitions": [
+                    factor_definition.to_dict()
+                    for factor_definition in result.factor_definitions
+                ],
                 "rolling_features": list(spec.rolling_features),
                 "rolling_windows": list(spec.rolling_windows),
                 "rank_transforms": list(spec.rank_transforms),
@@ -442,6 +358,10 @@ class FeatureAgent:
 
         base_factor_columns = tuple(factor_columns)
         composite_factor_columns: tuple[str, ...] = ()
+        factor_definition_registry = FactorDefinitionRegistry.from_templates_and_composites(
+            templates,
+            composite_factors,
+        )
         if composite_factors:
             generated_composite_columns = []
             for composite_factor in composite_factors:
@@ -500,6 +420,11 @@ class FeatureAgent:
             stats=stats,
             rolling_feature_stats=rolling_feature_stats,
             rank_transform_stats=rank_transform_stats,
+            factor_definitions=tuple(
+                factor_definition
+                for factor_definition in factor_definition_registry.all()
+                if factor_definition.factor_column in factor_columns
+            ),
         )
 
     def _templates_for(self, spec: FeatureSpec) -> list[FactorTemplate]:
@@ -851,26 +776,6 @@ def _required_path(payload: Mapping[str, Any], key: str) -> Path:
     return Path(value.strip()).expanduser().resolve()
 
 
-def _required_str(payload: Mapping[str, Any], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value.strip():
-        msg = f"{key} must be a non-empty string."
-        raise ValueError(msg)
-    return value.strip()
-
-
-def _required_float(payload: Mapping[str, Any], key: str) -> float:
-    value = payload.get(key)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        msg = f"{key} must be a finite number."
-        raise ValueError(msg)
-    number = float(value)
-    if not np.isfinite(number):
-        msg = f"{key} must be a finite number."
-        raise ValueError(msg)
-    return number
-
-
 def _optional_str_sequence(payload: Mapping[str, Any], key: str) -> tuple[str, ...]:
     value = payload.get(key)
     if value is None:
@@ -962,20 +867,3 @@ def _optional_str(payload: Mapping[str, Any], key: str, default: str) -> str:
         msg = f"payload.{key} must be a non-empty string."
         raise ValueError(msg)
     return value.strip()
-
-
-def _validate_composite_name(value: str) -> str:
-    if not _COMPOSITE_NAME_PATTERN.fullmatch(value):
-        msg = (
-            "composite factor name must contain only letters, numbers, "
-            "and underscores."
-        )
-        raise ValueError(msg)
-    return value
-
-
-def _factor_column_reference(value: str) -> str:
-    factor = value.strip()
-    if factor.startswith("factor__"):
-        return factor
-    return f"factor__{factor}"

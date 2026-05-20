@@ -46,9 +46,14 @@ REPORT_LABELS = {
     "generated_at": LocalizedText(en="Generated at", zh="生成时间"),
     "factor": LocalizedText(en="Factor", zh="因子"),
     "name": LocalizedText(en="Name", zh="名称"),
+    "factor_column": LocalizedText(en="Factor column", zh="因子列"),
+    "source_type": LocalizedText(en="Source type", zh="因子来源类型"),
+    "category": LocalizedText(en="Category", zh="类别"),
     "formula": LocalizedText(en="Formula", zh="公式"),
     "hypothesis": LocalizedText(en="Hypothesis", zh="假设"),
     "direction": LocalizedText(en="Direction", zh="方向"),
+    "lookback_days": LocalizedText(en="Lookback days", zh="回看天数"),
+    "data_lag_days": LocalizedText(en="Data lag days", zh="数据滞后天数"),
     "universe": LocalizedText(en="Universe", zh="股票池"),
     "forward_return_days": LocalizedText(en="Forward return days", zh="前瞻收益天数"),
     "related_factors": LocalizedText(en="Related factors", zh="相关因子"),
@@ -454,9 +459,14 @@ def build_report_draft(
         },
         "factor": {
             "name": factor_name,
+            "factor_column": factor.get("factor_column"),
+            "source_type": factor.get("source_type"),
+            "category": factor.get("category"),
             "formula": factor.get("formula"),
             "hypothesis": factor.get("hypothesis"),
             "direction": factor.get("direction"),
+            "lookback_days": factor.get("lookback_days"),
+            "data_lag_days": factor.get("data_lag_days"),
             "forward_return_days": factor.get("forward_return_days"),
             "universe": factor.get("universe"),
         },
@@ -510,10 +520,20 @@ def render_report_markdown(report_draft: Mapping[str, Any]) -> str:
         f"## {_report_label('factor', output_language)}",
         "",
         f"- {_report_label('name', output_language)}: {_string_or_na(factor.get('name'))}",
+        f"- {_report_label('factor_column', output_language)}: "
+        f"{_string_or_na(factor.get('factor_column'))}",
+        f"- {_report_label('source_type', output_language)}: "
+        f"{_format_markdown_value(factor.get('source_type'), output_language)}",
+        f"- {_report_label('category', output_language)}: "
+        f"{_string_or_na(factor.get('category'))}",
         f"- {_report_label('formula', output_language)}: "
         f"{_string_or_na(factor.get('formula'))}",
         f"- {_report_label('direction', output_language)}: "
         f"{_format_markdown_value(factor.get('direction'), output_language)}",
+        f"- {_report_label('lookback_days', output_language)}: "
+        f"{_string_or_na(factor.get('lookback_days'))}",
+        f"- {_report_label('data_lag_days', output_language)}: "
+        f"{_string_or_na(factor.get('data_lag_days'))}",
         f"- {_report_label('universe', output_language)}: "
         f"{_string_or_na(factor.get('universe'))}",
         "",

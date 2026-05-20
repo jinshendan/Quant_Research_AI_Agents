@@ -38,9 +38,14 @@ WIKI_LABELS = {
     "failed_benchmarks": LocalizedText(en="Failed benchmarks", zh="未通过基准"),
     "memory_id": LocalizedText(en="Memory ID", zh="记忆 ID"),
     "source_task": LocalizedText(en="Source task", zh="来源任务"),
+    "factor_column": LocalizedText(en="Factor column", zh="因子列"),
+    "source_type": LocalizedText(en="Source type", zh="因子来源类型"),
+    "category": LocalizedText(en="Category", zh="类别"),
     "formula": LocalizedText(en="Formula", zh="公式"),
     "hypothesis": LocalizedText(en="Hypothesis", zh="假设"),
     "direction": LocalizedText(en="Direction", zh="方向"),
+    "lookback_days": LocalizedText(en="Lookback days", zh="回看天数"),
+    "data_lag_days": LocalizedText(en="Data lag days", zh="数据滞后天数"),
     "forward_return_days": LocalizedText(en="Forward return days", zh="前瞻收益天数"),
     "universe": LocalizedText(en="Universe", zh="股票池"),
     "turnover": LocalizedText(en="Turnover", zh="换手率"),
@@ -237,11 +242,21 @@ def _factor_section(
         "",
         f"- {_wiki_label('memory_id', output_language)}: `{_text(record.get('memory_id'))}`",
         f"- {_wiki_label('source_task', output_language)}: `{_text(source.get('task_id'))}`",
+        f"- {_wiki_label('factor_column', output_language)}: "
+        f"{_text_or_na(factor.get('factor_column'))}",
+        f"- {_wiki_label('source_type', output_language)}: "
+        f"{_text_or_na(factor.get('source_type'))}",
+        f"- {_wiki_label('category', output_language)}: "
+        f"{_text_or_na(factor.get('category'))}",
         f"- {_wiki_label('formula', output_language)}: {_text_or_na(factor.get('formula'))}",
         f"- {_wiki_label('hypothesis', output_language)}: "
         f"{_text_or_na(factor.get('hypothesis'))}",
         f"- {_wiki_label('direction', output_language)}: "
         f"{_text_or_na(factor.get('direction'))}",
+        f"- {_wiki_label('lookback_days', output_language)}: "
+        f"{_text_or_na(factor.get('lookback_days'))}",
+        f"- {_wiki_label('data_lag_days', output_language)}: "
+        f"{_text_or_na(factor.get('data_lag_days'))}",
         f"- {_wiki_label('forward_return_days', output_language)}: "
         f"{_text_or_na(factor.get('forward_return_days'))}",
         f"- {_wiki_label('universe', output_language)}: "

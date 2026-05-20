@@ -41,6 +41,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | HypothesisAgent | 已实现 | 生成结构化 alpha 假设 |
 | 因子模板库 | 已实现 | 动量、反转、波动率、流动性、突破等模板 |
 | FeatureAgent | 已实现 | 计算因子矩阵、组合因子、ranking transform、rolling feature |
+| FactorDefinitionRegistry | 已实现 | 为模板因子和组合因子保存公式、假设、类别、来源、lookback、data lag |
 | FactorGenerationAgent | 已实现 | 生成 50 个确定性候选因子 |
 | BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
 | 交易成本模型 | 已实现 | 佣金、印花税、过户费、滑点、换手率、gross/net 指标 |
@@ -65,6 +66,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | --- | --- | --- |
 | DataAgent | `quant-agent/agents/data_agent.py` | 获取、清洗、对齐、缓存并保存市场数据 |
 | FeatureAgent | `quant-agent/agents/feature_agent.py` | 从 aligned OHLCV 计算单因子和组合因子矩阵 |
+| Factor registry | `quant-agent/agents/factor_registry.py` | 管理因子定义、组合因子配置和因子来源元数据 |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | 生成候选因子定义 |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | 统一管理 A 股交易成本假设和换手成本估算 |
@@ -238,7 +240,9 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
 ```
 
 `normalize` 支持 `none`、`rank_pct` 和 `zscore`。组合因子会写入 factor matrix、
-factor manifest 和 daily research manifest。
+factor manifest 和 daily research manifest。`factor_definitions` 会保存每个因子的
+`source_type`、`formula`、`hypothesis`、`category`、`direction`、`lookback_days`
+和 `data_lag_days`；研究报告和 Factor Wiki 也会显示这些字段。
 
 该脚本会依次运行 `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent
 -> DailyRankingAgent -> MemoryAgent -> ReportAgent`，并在 `output_dir/run_id/daily_research_manifest.json` 保存
@@ -430,7 +434,7 @@ print(report_response.output["report_path"])
 
 | 优先级 | 计划 |
 | --- | --- |
-| P0 | 完善因子选择、组合因子和因子定义注册表 |
+| P0 | 已完成因子选择、组合因子和因子定义注册表 |
 | P1 | 构建 ExperimentAgent 和 ExperimentStore，批量运行候选因子实验 |
 | P2 | 加入样本外验证、walk-forward validation、因子衰减和稳健性检查 |
 | P3 | 做因子相关性分析、多因子 alpha 选择和候选池管理 |
@@ -479,6 +483,7 @@ for real-money trading decisions.
 | HypothesisAgent | Done | Structured alpha hypotheses |
 | Factor templates | Done | Momentum, reversal, volatility, liquidity, breakout templates |
 | FeatureAgent | Done | Factor matrices, composite factors, ranking transforms, rolling features |
+| FactorDefinitionRegistry | Done | Formula, hypothesis, category, source type, lookback, and data-lag metadata for template and composite factors |
 | FactorGenerationAgent | Done | 50 deterministic candidate factors |
 | BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
 | Transaction cost model | Done | Commission, stamp duty, transfer fee, slippage, turnover, gross/net metrics |
@@ -503,6 +508,7 @@ for real-money trading decisions.
 | --- | --- | --- |
 | DataAgent | `quant-agent/agents/data_agent.py` | Ingest, clean, align, cache, and persist market data |
 | FeatureAgent | `quant-agent/agents/feature_agent.py` | Compute single-factor and composite-factor matrices from aligned OHLCV |
+| Factor registry | `quant-agent/agents/factor_registry.py` | Manage factor definitions, composite factor configs, and source metadata |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | Generate candidate factor definitions |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | Centralize A-share cost assumptions and turnover cost estimates |
@@ -649,6 +655,9 @@ signals, define `composite_factors` and select the generated composite column:
 
 `normalize` supports `none`, `rank_pct`, and `zscore`. Composite factors are
 written into the factor matrix, factor manifest, and daily research manifest.
+`factor_definitions` stores each factor's `source_type`, `formula`,
+`hypothesis`, `category`, `direction`, `lookback_days`, and `data_lag_days`;
+research reports and the Factor Wiki display those fields.
 
 The script runs `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent
 -> DailyRankingAgent -> MemoryAgent -> ReportAgent` and writes
@@ -782,10 +791,10 @@ print(response.output["cost_stats"])
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions
 - build ExperimentAgent and ExperimentStore for batch factor research
 - add out-of-sample, walk-forward, decay, and robustness validation
 - add factor correlation analysis and multi-factor alpha selection
+- build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions
 - build PortfolioAgent, paper trading logs, dashboard filters, and watchlist workflows
 
 ### Safety Note

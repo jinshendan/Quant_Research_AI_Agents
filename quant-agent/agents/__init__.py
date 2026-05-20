@@ -66,6 +66,12 @@ from agents.factor_rolling import (
     RollingFeatureSpec,
     apply_rolling_features,
 )
+from agents.factor_registry import (
+    CompositeFactorComponent,
+    CompositeFactorSpec,
+    FactorDefinition,
+    FactorDefinitionRegistry,
+)
 from agents.factor_store import (
     FactorMatrixStore,
     FactorStorageContext,
@@ -90,13 +96,7 @@ from agents.factor_generator import (
     FactorGenerationSpec,
     GeneratedFactor,
 )
-from agents.feature_agent import (
-    CompositeFactorComponent,
-    CompositeFactorSpec,
-    FeatureAgent,
-    FeatureGenerationResult,
-    FeatureSpec,
-)
+from agents.feature_agent import FeatureAgent, FeatureGenerationResult, FeatureSpec
 from agents.hypothesis_agent import (
     HypothesisAgent,
     HypothesisSpec,
@@ -181,6 +181,8 @@ __all__ = [
     "FactorFamily",
     "FactorGenerationAgent",
     "FactorGenerationSpec",
+    "FactorDefinition",
+    "FactorDefinitionRegistry",
     "FactorMatrixStore",
     "FactorMemoryRecord",
     "FactorMemoryStore",

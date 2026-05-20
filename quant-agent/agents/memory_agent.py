@@ -466,11 +466,38 @@ def build_factor_memory_record(
         },
         "factor": {
             "name": factor_name,
+            "factor_column": _metadata_optional_str(factor_metadata, "factor_column"),
+            "source_type": _metadata_optional_str(factor_metadata, "source_type"),
+            "category": _metadata_optional_str(factor_metadata, "category"),
             "formula": _metadata_optional_str(factor_metadata, "formula"),
             "hypothesis": _metadata_optional_str(factor_metadata, "hypothesis"),
             "direction": inputs.get("factor_direction"),
             "forward_return_days": inputs.get("forward_return_days"),
+            "lookback_days": _metadata_optional_number(
+                factor_metadata,
+                "lookback_days",
+            ),
+            "data_lag_days": _metadata_optional_number(
+                factor_metadata,
+                "data_lag_days",
+            ),
             "universe": _metadata_optional_str(factor_metadata, "universe"),
+            "required_columns": _metadata_str_sequence(
+                factor_metadata,
+                "required_columns",
+            ),
+            "signal_tags": _metadata_str_sequence(
+                factor_metadata,
+                "signal_tags",
+            ),
+            "risk_flags": _metadata_str_sequence(
+                factor_metadata,
+                "risk_flags",
+            ),
+            "components": _metadata_optional_sequence_of_mappings(
+                factor_metadata,
+                "components",
+            ),
         },
         "performance": {
             "ic": summary.get("mean_ic"),
@@ -668,6 +695,25 @@ def _metadata_str_sequence(metadata: Mapping[str, Any], key: str) -> list[str]:
         if cleaned not in seen:
             items.append(cleaned)
             seen.add(cleaned)
+    return items
+
+
+def _metadata_optional_sequence_of_mappings(
+    metadata: Mapping[str, Any],
+    key: str,
+) -> list[dict[str, Any]]:
+    value = metadata.get(key)
+    if value is None:
+        return []
+    if isinstance(value, str) or not isinstance(value, list | tuple):
+        msg = f"factor_metadata.{key} must be a sequence of objects when provided."
+        raise ValueError(msg)
+    items: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            msg = f"factor_metadata.{key} must contain only objects."
+            raise ValueError(msg)
+        items.append(dict(item))
     return items
 
 

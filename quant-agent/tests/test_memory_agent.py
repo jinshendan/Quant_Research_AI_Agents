@@ -209,11 +209,20 @@ def test_memory_agent_saves_factor_memory_record_from_result_json_path(
     assert record["source"]["task_id"] == "backtest-task-1"
     assert record["factor"] == {
         "name": "alpha_001",
+        "factor_column": None,
+        "source_type": None,
+        "category": None,
         "formula": "rank(close)",
         "hypothesis": "Higher rank(close) predicts returns.",
         "direction": "positive",
         "forward_return_days": 1,
+        "lookback_days": None,
+        "data_lag_days": None,
         "universe": None,
+        "required_columns": [],
+        "signal_tags": [],
+        "risk_flags": [],
+        "components": [],
     }
     assert record["performance"]["ic"] == 0.06
     assert record["performance"]["rank_ic"] == 0.07

@@ -161,6 +161,15 @@ def test_run_daily_research_writes_manifest_and_artifacts(tmp_path: Path) -> Non
     assert manifest["stages"]["backtest"]["summary"]["cost_stats"][
         "total_transaction_cost"
     ] > 0
+    factor_definitions = manifest["stages"]["feature"]["summary"]["factor_definitions"]
+    assert factor_definitions[0]["factor_column"] == "factor__close_to_open_return"
+    assert factor_definitions[0]["source_type"] == "template"
+    memory_record = Path(manifest["artifacts"]["memory_path"]).read_text(
+        encoding="utf-8"
+    ).strip().splitlines()[-1]
+    memory_document = json.loads(memory_record)
+    assert memory_document["factor"]["source_type"] == "template"
+    assert memory_document["factor"]["category"] == "price_action"
 
     artifact_keys = (
         "aligned_data_path",
@@ -301,7 +310,21 @@ def test_run_daily_research_uses_configured_composite_factor(tmp_path: Path) -> 
     assert manifest["stages"]["feature"]["summary"]["composite_factor_columns"] == [
         "factor__daily_blend"
     ]
+    assert manifest["stages"]["feature"]["summary"]["factor_definitions"][-1][
+        "source_type"
+    ] == "composite"
     assert manifest["summary"]["top_ranked_symbols"] == ["000006", "000005", "000004"]
+
+    memory_record = Path(manifest["artifacts"]["memory_path"]).read_text(
+        encoding="utf-8"
+    ).strip().splitlines()[-1]
+    memory_document = json.loads(memory_record)
+    assert memory_document["factor"]["source_type"] == "composite"
+    assert memory_document["factor"]["category"] == "composite"
+    assert memory_document["factor"]["lookback_days"] == 1
+    assert memory_document["factor"]["components"][0]["factor_column"] == (
+        "factor__close_to_open_return"
+    )
 
 
 @dataclass(slots=True)

@@ -429,6 +429,8 @@ Implemented in `quant-agent/`:
 -   aligned OHLCV CSV loading and normalization
 -   template selection through `FactorTemplateLibrary`
 -   optional `composite_factors` definitions for weighted multi-factor signals
+-   `FactorDefinitionRegistry` handoff for template and composite factor
+    metadata
 -   pandas execution paths for all current Day 9 default templates
 -   per-symbol rolling, delay, percent-change, z-score, drawdown, breakout, and
     candle-position calculations
@@ -470,6 +472,7 @@ template_ids
 factor_columns
 base_factor_columns
 composite_factor_columns
+factor_definitions
 row_count
 factor_count
 preview
@@ -478,8 +481,37 @@ feature_stats
 
 Composite factors are generated as ordinary `factor__...` columns and can be
 used by downstream backtests and rankings by explicitly selecting their
-`factor_column`. Ranking transforms, rolling features, persistence, and
-evaluation are implemented in later sections below.
+`factor_column`. `factor_definitions` records `source_type`, `formula`,
+`hypothesis`, `category`, `direction`, `lookback_days`, `data_lag_days`,
+required columns, signal tags, risk flags, and component definitions where
+available. Ranking transforms, rolling features, persistence, and evaluation
+are implemented in later sections below.
+
+## FactorDefinitionRegistry
+
+Implemented in `quant-agent/agents/factor_registry.py`:
+
+-   `CompositeFactorSpec` and `CompositeFactorComponent` for validating
+    weighted composite factor configuration
+-   `FactorDefinition` for concrete factor-column metadata
+-   `FactorDefinitionRegistry` for read-only lookup by `factor__...` column
+-   template factor definitions derived from `FactorTemplate`
+-   composite factor definitions derived from their component definitions
+-   validation for duplicate composite names, missing component factors,
+    unsupported methods, unsupported normalization, and zero-weight composites
+
+Current factor definition fields:
+
+```text
+factor_id, factor_column, name, source_type, formula, hypothesis,
+category, direction, lookback_days, data_lag_days, required_columns,
+parameters, signal_tags, risk_flags, components
+```
+
+This registry is intentionally local and deterministic. It does not decide
+whether a factor is tradable; it only gives downstream agents consistent
+research metadata for manifests, memory, reports, and future experiment
+comparison.
 
 ## Day 11 --- First 50 Factor Candidates
 
@@ -1372,6 +1404,8 @@ Implemented in `quant-agent/`:
     columns, unless `allow_implicit_factor_column=true` is set
 -   `composite_factors` passthrough to FeatureAgent for weighted multi-factor
     daily research signals
+-   selected factor metadata enrichment from `factor_definitions` before
+    calling MemoryAgent and ReportAgent
 -   terminal summary with run status, manifest path, factor column, benchmark
     status, failed benchmark tests, critic verdict, critic severity, memory ID,
     ranking paths, and report path

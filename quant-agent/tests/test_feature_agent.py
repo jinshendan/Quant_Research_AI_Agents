@@ -8,12 +8,8 @@ import pandas as pd
 import pytest
 
 from agents.factor_templates import FactorTemplate, FactorTemplateLibrary
-from agents.feature_agent import (
-    CompositeFactorSpec,
-    FeatureAgent,
-    FeatureSpec,
-    normalize_aligned_ohlcv,
-)
+from agents.factor_registry import CompositeFactorSpec
+from agents.feature_agent import FeatureAgent, FeatureSpec, normalize_aligned_ohlcv
 from core.config import AppConfig
 from core.logging import configure_logging, get_agent_logger
 from core.models import AgentRequest
@@ -128,6 +124,8 @@ def test_feature_agent_generates_selected_factor_values(tmp_path: Path) -> None:
     ]
     assert response.output["base_factor_columns"] == response.output["factor_columns"]
     assert response.output["composite_factor_columns"] == []
+    assert response.output["factor_definitions"][0]["factor_column"] == "factor__return_3d"
+    assert response.output["factor_definitions"][0]["source_type"] == "template"
     assert response.output["rolling_feature_columns"] == []
     assert response.output["transformed_factor_columns"] == []
     assert response.output["rolling_feature_stats"] == {}
@@ -205,6 +203,10 @@ def test_feature_agent_saves_factor_matrix_when_requested(tmp_path: Path) -> Non
     ]
     assert manifest["context"]["composite_factor_columns"] == []
     assert manifest["context"]["composite_factor_definitions"] == []
+    assert manifest["context"]["factor_definitions"][0]["factor_column"] == (
+        "factor__close_to_open_return"
+    )
+    assert manifest["context"]["factor_definitions"][0]["source_type"] == "template"
     assert manifest["storage"]["matrix_path"] == str(matrix_path)
     assert "FeatureAgent | save_factors | success" in stream.getvalue()
 
@@ -301,6 +303,10 @@ def test_feature_agent_saves_composite_factor_definition(tmp_path: Path) -> None
 
     assert response.status == "success"
     assert response.output["composite_factor_columns"] == ["factor__momentum_blend"]
+    assert response.output["factor_definitions"][-1]["source_type"] == "composite"
+    assert response.output["factor_definitions"][-1]["formula"] == (
+        "0.6 * rank_pct(return_3d) + 0.4 * rank_pct(close_to_open_return)"
+    )
     assert response.output["factor_count"] == 3
 
     manifest_path = Path(response.output["storage_stats"]["manifest_path"])
@@ -320,6 +326,10 @@ def test_feature_agent_saves_composite_factor_definition(tmp_path: Path) -> None
             ],
         }
     ]
+    assert manifest["context"]["factor_definitions"][-1]["factor_column"] == (
+        "factor__momentum_blend"
+    )
+    assert manifest["context"]["factor_definitions"][-1]["source_type"] == "composite"
 
 
 def test_feature_agent_rejects_composite_missing_component(tmp_path: Path) -> None:

@@ -54,17 +54,17 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
   - [x] 禁止静默使用第一个模板因子作为最终信号，除非配置显式允许
   - [x] 在 manifest 中保存本次真正用于回测、排名和报告的 `selected_factor_column`
 
-- [ ] 支持多因子组合
+- [x] 支持多因子组合
   - [x] 在 FeatureAgent 中支持 `composite_factors`
   - [x] 支持多个基础因子按权重合成
   - [x] 支持按交易日横截面 rank / z-score 后再合成
   - [x] 支持在 daily research 中指定组合因子作为 `factor_column`
-  - [ ] 在报告中展示组合因子的公式、权重和组件贡献
+  - [x] 在报告中展示组合因子的公式、权重和组件贡献
 
-- [ ] 增加因子定义注册表
-  - [ ] 每个因子保存 name、formula、hypothesis、category、direction、lookback、data_lag
-  - [ ] 区分模板因子、组合因子、实验生成因子和人工研究因子
-  - [ ] 报告中明确“这是模板因子 / 组合因子 / 实验候选因子”
+- [x] 增加因子定义注册表
+  - [x] 每个因子保存 name、formula、hypothesis、category、direction、lookback、data_lag
+  - [x] 区分模板因子、组合因子、实验生成因子和人工研究因子
+  - [x] 报告中明确“这是模板因子 / 组合因子 / 实验候选因子”
 
 ## P1 --- 构建 ExperimentAgent：从模板日报升级为因子研究工厂
 
@@ -259,16 +259,17 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 - [x] 收紧默认回测质量门槛
 - [x] 构建 CriticAgent
 - [x] 保存研究记忆和报告
+- [x] 增加因子定义注册表
 - [x] 提供 dashboard 复盘入口
 
 ## 建议下一步
 
 优先做 P0，而不是继续堆更多简单模板因子：
 
-1. 支持多因子组合，并让 daily research 显式选择最终用于回测和排名的因子。
-2. 增加因子定义注册表，让每个因子都有公式、假设、方向、数据滞后和类别。
-3. 构建 ExperimentAgent，把单次日报升级为批量因子实验。
-4. 增加样本外验证和因子衰减测试，防止过拟合。
+1. 构建 ExperimentAgent，把单次日报升级为批量因子实验。
+2. 增加 ExperimentStore，保存实验配置、数据版本、因子定义和结果。
+3. 增加样本外验证和因子衰减测试，防止过拟合。
+4. 增加因子相关性分析，避免重复研究高度相似信号。
 5. 在有了通过验证的候选 alpha 后，再构建 DecisionAgent 来服务银轮股份这类单票观察。
 
 这条路线更接近量化公司 Quant Researcher 的工作方式：先大规模研究和验证因子，

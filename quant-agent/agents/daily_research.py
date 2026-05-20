@@ -18,7 +18,8 @@ from agents.daily_ranking import (
     DEFAULT_RANKING_TOP_N,
     DailyRankingAgent,
 )
-from agents.feature_agent import CompositeFactorSpec, FeatureAgent
+from agents.factor_registry import CompositeFactorSpec
+from agents.feature_agent import FeatureAgent
 from agents.market_data_provider import MarketDataProvider
 from agents.memory_agent import MemoryAgent
 from agents.report_agent import ReportAgent
@@ -447,7 +448,11 @@ def run_daily_research(
         artifacts.update(stages["ranking"]["artifacts"])
 
         factor_metadata = _factor_metadata_with_critic(
-            _factor_metadata(spec, factor_column),
+            _factor_metadata(
+                spec,
+                factor_column,
+                _selected_factor_definition(feature_response, factor_column),
+            ),
             critic_response,
         )
         memory_response = MemoryAgent(config=config).run(
@@ -661,18 +666,65 @@ def _selected_factor_column(spec: DailyResearchSpec, response: AgentResponse) ->
     raise ValueError(msg)
 
 
-def _factor_metadata(spec: DailyResearchSpec, factor_column: str) -> dict[str, Any]:
+def _factor_metadata(
+    spec: DailyResearchSpec,
+    factor_column: str,
+    factor_definition: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     metadata = dict(spec.factor_metadata)
+    factor_definition = factor_definition or {}
     factor_name = metadata.get("name")
     if not isinstance(factor_name, str) or not factor_name.strip():
-        metadata["name"] = factor_column.removeprefix("factor__")
-    metadata.setdefault("formula", factor_column)
+        metadata["name"] = _definition_str(
+            factor_definition,
+            "name",
+            factor_column.removeprefix("factor__"),
+        )
+    metadata.setdefault(
+        "formula",
+        _definition_str(factor_definition, "formula", factor_column),
+    )
     metadata.setdefault(
         "hypothesis",
-        f"Daily research run for {factor_column}.",
+        _definition_str(
+            factor_definition,
+            "hypothesis",
+            f"Daily research run for {factor_column}.",
+        ),
     )
+    for key in (
+        "source_type",
+        "category",
+        "direction",
+        "lookback_days",
+        "data_lag_days",
+        "required_columns",
+        "parameters",
+        "signal_tags",
+        "risk_flags",
+        "components",
+    ):
+        if key in factor_definition:
+            metadata.setdefault(key, factor_definition[key])
+    metadata.setdefault("factor_column", factor_column)
     metadata.setdefault("universe", spec.universe)
     return metadata
+
+
+def _selected_factor_definition(
+    response: AgentResponse,
+    factor_column: str,
+) -> Mapping[str, Any] | None:
+    definitions = response.output.get("factor_definitions")
+    if not isinstance(definitions, list):
+        return None
+    for definition in definitions:
+        if (
+            isinstance(definition, Mapping)
+            and definition.get("factor_column") == factor_column
+        ):
+            return definition
+    return None
 
 
 def _factor_metadata_with_critic(
@@ -743,6 +795,7 @@ def _feature_stage(response: AgentResponse) -> dict[str, Any]:
             "base_factor_columns": output.get("base_factor_columns"),
             "composite_factor_columns": output.get("composite_factor_columns"),
             "composite_factors": output.get("composite_factors"),
+            "factor_definitions": output.get("factor_definitions"),
             "row_count": output.get("row_count"),
             "factor_count": output.get("factor_count"),
             "feature_stats": output.get("feature_stats"),
@@ -1061,6 +1114,15 @@ def _optional_output_language(payload: Mapping[str, Any]) -> OutputLanguage:
         msg = "config.output_language must be a string."
         raise ValueError(msg)
     return normalize_output_language(value)
+
+
+def _definition_str(
+    definition: Mapping[str, Any],
+    key: str,
+    fallback: str,
+) -> str:
+    value = definition.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else fallback
 
 
 def _optional_bool(payload: Mapping[str, Any], key: str, default: bool) -> bool:
