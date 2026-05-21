@@ -96,8 +96,10 @@ def test_experiment_agent_runs_factor_batch_and_writes_artifacts(tmp_path: Path)
     storage = response.output["storage_stats"]
     result_path = Path(storage["result_path"])
     summary_path = Path(storage["summary_path"])
+    index_path = Path(storage["index_path"])
     assert result_path.is_file()
     assert summary_path.is_file()
+    assert index_path.is_file()
     saved = json.loads(result_path.read_text(encoding="utf-8"))
     assert saved["selected_factor_columns"] == ["factor__good", "factor__bad"]
     assert saved["factor_definitions"][0]["factor_column"] == "factor__good"

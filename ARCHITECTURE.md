@@ -1584,11 +1584,15 @@ Implemented in `quant-agent/`:
 -   experiment-level artifact persistence:
     -   `experiment_result.json`
     -   `experiment_summary.csv`
+-   experiment history index at `experiments/experiment_index.jsonl`, with one
+    denormalized row per factor result
 -   structured records for status, failed stage, benchmark status, failed
     benchmark tests, critic verdict, critic severity, metric snapshot, and
     result path
+-   storage metadata exposing result, summary, and index paths
 -   tests for request normalization, batch success/rejection behavior, unknown
-    factor validation, JSON persistence, and CSV summary output
+    factor validation, JSON persistence, CSV summary output, and JSONL history
+    indexing
 
 Current ExperimentAgent payload:
 
@@ -1636,10 +1640,10 @@ storage_stats
 
 The MVP deliberately evaluates factors that already exist in a persisted factor
 manifest. It does not yet generate new candidate formulas, execute those
-formulas through FeatureAgent, maintain a historical JSONL/DuckDB experiment
-index, or perform sample-out validation. Those capabilities remain in the P1
-and P2 TODO items because they need stricter data lineage, configuration hashes,
-and train/validation/test boundaries.
+formulas through FeatureAgent, maintain a DuckDB experiment table, expose a
+history query API, or perform sample-out validation. Those capabilities remain
+in the P1 and P2 TODO items because they need stricter data lineage,
+configuration hashes, and train/validation/test boundaries.
 
 ## Project Output Language
 
