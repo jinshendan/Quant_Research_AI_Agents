@@ -29,6 +29,8 @@ class FactorStorageContext:
     feature_stats: Mapping[str, Any]
     rolling_feature_stats: Mapping[str, Any]
     rank_transform_stats: Mapping[str, Any]
+    generated_factor_columns: tuple[str, ...] = ()
+    generated_factor_definitions: tuple[Mapping[str, Any], ...] = ()
     composite_factor_columns: tuple[str, ...] = ()
     composite_factor_definitions: tuple[Mapping[str, Any], ...] = ()
     factor_definitions: tuple[Mapping[str, Any], ...] = ()
@@ -40,6 +42,11 @@ class FactorStorageContext:
             "source_aligned_data_path": self.source_aligned_data_path,
             "template_ids": list(self.template_ids),
             "base_factor_columns": list(self.base_factor_columns),
+            "generated_factor_columns": list(self.generated_factor_columns),
+            "generated_factor_definitions": [
+                dict(definition)
+                for definition in self.generated_factor_definitions
+            ],
             "composite_factor_columns": list(self.composite_factor_columns),
             "composite_factor_definitions": [
                 dict(definition)

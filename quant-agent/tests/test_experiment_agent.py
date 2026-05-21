@@ -148,7 +148,7 @@ def test_experiment_agent_generates_manifest_from_candidates(tmp_path: Path) -> 
                 "factor_set_name": "generated demo",
                 "experiment_id": "generated-batch",
                 "output_dir": "experiments",
-                "factor_columns": ["factor__return_5d"],
+                "factor_columns": ["factor__alpha_001"],
                 "quantile_count": 3,
                 "benchmark_thresholds": {
                     "min_usable_rows": 1,
@@ -171,19 +171,23 @@ def test_experiment_agent_generates_manifest_from_candidates(tmp_path: Path) -> 
     assert response.status == "success"
     assert response.output["factor_count"] == 1
     assert response.output["successful_factor_count"] == 1
-    assert response.output["candidate_generation"]["executable_mapping"][
-        "executable_template_ids"
-    ] == ["return_5d"]
-    assert response.output["feature_generation"]["factor_columns"] == [
-        "factor__return_5d"
+    assert response.output["candidate_generation"]["execution"][
+        "method"
+    ] == "generated_expression_v1"
+    assert response.output["candidate_generation"]["execution"][
+        "executable_factor_ids"
+    ] == ["alpha_001"]
+    assert response.output["feature_generation"]["generated_factor_columns"] == [
+        "factor__alpha_001"
     ]
+    assert response.output["feature_generation"]["factor_columns"] == ["factor__alpha_001"]
     storage = response.output["storage_stats"]
     saved = json.loads(Path(storage["result_path"]).read_text(encoding="utf-8"))
     assert saved["factor_manifest_path"].endswith(".manifest.json")
-    assert saved["candidate_generation"]["executable_mapping"][
-        "executable_template_ids"
-    ] == ["return_5d"]
-    assert saved["feature_generation"]["factor_columns"] == ["factor__return_5d"]
+    assert saved["candidate_generation"]["execution"]["executable_factor_ids"] == [
+        "alpha_001"
+    ]
+    assert saved["feature_generation"]["factor_columns"] == ["factor__alpha_001"]
     assert Path(saved["factor_manifest_path"]).is_file()
     assert Path(saved["records"][0]["result_json_path"]).is_file()
 

@@ -43,8 +43,9 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | 因子模板库 | 已实现 | 动量、反转、波动率、流动性、突破等模板 |
 | FeatureAgent | 已实现 | 计算因子矩阵、组合因子、ranking transform、rolling feature |
 | FactorDefinitionRegistry | 已实现 | 为模板因子和组合因子保存公式、假设、类别、来源、lookback、data lag |
-| FactorGenerationAgent | 已实现 | 生成 50 个确定性候选因子 |
-| ExperimentAgent | 已实现 MVP | 批量回测 factor manifest 中的多个因子并调用 CriticAgent 审查 |
+| FactorExpression | 已实现 | 执行受限候选公式语法，支持 delay、mean、std、zscore、slope、max_drawdown 等函数 |
+| FactorGenerationAgent | 已实现 | 生成 90 个确定性候选因子，覆盖动量、反转、量价、波动率、流动性、突破和组合类 |
+| ExperimentAgent | 已实现 MVP | 批量回测 factor manifest 或自动生成候选公式，并调用 CriticAgent 审查 |
 | ExperimentStore | 已实现 MVP | 保存单次实验 JSON、CSV 汇总、JSONL 历史索引、lineage 元数据和历史查询 |
 | BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
 | OutOfSampleAgent | 已实现 MVP | 按 train / validation / test 信号日期切分复用 BacktestAgent，并保存样本外验证 JSON 和 CSV 汇总 |
@@ -71,6 +72,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | DataAgent | `quant-agent/agents/data_agent.py` | 获取、清洗、对齐、缓存并保存市场数据 |
 | FeatureAgent | `quant-agent/agents/feature_agent.py` | 从 aligned OHLCV 计算单因子和组合因子矩阵 |
 | Factor registry | `quant-agent/agents/factor_registry.py` | 管理因子定义、组合因子配置和因子来源元数据 |
+| Factor expression | `quant-agent/agents/factor_expression.py` | 安全执行 FactorGenerationAgent 生成的参数化候选公式 |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | 生成候选因子定义 |
 | ExperimentAgent | `quant-agent/agents/experiment_agent.py` | 批量评估 factor manifest 中的多个因子 |
 | ExperimentStore | `quant-agent/agents/experiment_store.py` | 保存实验结果、汇总表、历史索引、lineage 元数据和查询结果 |
@@ -413,12 +415,12 @@ print(response.output["storage_stats"]["summary_path"])
 当前 ExperimentAgent MVP 会批量评估已有 factor manifest 中的因子列，逐个调用
 BacktestAgent 和 CriticAgent，并保存实验 JSON、CSV 汇总表、JSONL 历史索引和
 lineage 元数据。lineage 包含 git commit、dirty 状态、配置 hash、factor manifest
-hash 和数据版本指纹。它还没有直接执行参数化候选公式；这会在后续
-ExperimentAgent 扩展中完成。
+hash 和数据版本指纹。
 
 也可以让 ExperimentAgent 先生成候选因子，再自动调用 FeatureAgent 保存 factor
-manifest，然后批量回测。当前实现会把候选因子的 `source_template_id` 映射到
-FeatureAgent 已支持的可执行模板；参数化候选公式执行引擎仍是后续任务。
+manifest，然后批量回测。当前实现会直接执行 FactorGenerationAgent 生成的受限
+参数化表达式，而不是把候选因子降级映射到旧模板。生成后的因子列使用
+`factor__alpha_001`、`factor__alpha_002` 这类候选 ID。
 
 ```python
 from agents.experiment_agent import ExperimentAgent
@@ -439,7 +441,7 @@ response = ExperimentAgent().run(
         }
     )
 )
-print(response.output["candidate_generation"]["executable_mapping"])
+print(response.output["candidate_generation"]["execution"])
 print(response.output["factor_manifest_path"])
 ```
 
@@ -570,7 +572,7 @@ print(report_response.output["report_path"])
 | 优先级 | 计划 |
 | --- | --- |
 | P0 | 已完成因子选择、组合因子和因子定义注册表 |
-| P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引、lineage 记录、历史查询和候选生成到可执行模板映射 |
+| P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引、lineage 记录、历史查询、候选公式执行和扩展候选空间 |
 | P2 | 已加入基础 train / validation / test 样本外验证；下一步加入 walk-forward、因子衰减和稳健性检查 |
 | P3 | 做因子相关性分析、多因子 alpha 选择和候选池管理 |
 | P4 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
@@ -619,8 +621,9 @@ for real-money trading decisions.
 | Factor templates | Done | Momentum, reversal, volatility, liquidity, breakout templates |
 | FeatureAgent | Done | Factor matrices, composite factors, ranking transforms, rolling features |
 | FactorDefinitionRegistry | Done | Formula, hypothesis, category, source type, lookback, and data-lag metadata for template and composite factors |
-| FactorGenerationAgent | Done | 50 deterministic candidate factors |
-| ExperimentAgent | MVP done | Batch-backtests multiple factors from a factor manifest and critiques them |
+| FactorExpression | Done | Executes a restricted generated-formula grammar with delay, mean, std, zscore, slope, max_drawdown, and related functions |
+| FactorGenerationAgent | Done | 90 deterministic candidates across momentum, reversal, volume-price, volatility, liquidity, breakout, and composite families |
+| ExperimentAgent | MVP done | Batch-backtests factors from a manifest or generated candidate formulas and critiques them |
 | ExperimentStore | MVP done | Stores experiment JSON, CSV summary, JSONL history index, lineage metadata, and query results |
 | BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
 | OutOfSampleAgent | MVP done | Reuses BacktestAgent over train / validation / test signal-date windows and stores validation JSON plus CSV summaries |
@@ -647,6 +650,7 @@ for real-money trading decisions.
 | DataAgent | `quant-agent/agents/data_agent.py` | Ingest, clean, align, cache, and persist market data |
 | FeatureAgent | `quant-agent/agents/feature_agent.py` | Compute single-factor and composite-factor matrices from aligned OHLCV |
 | Factor registry | `quant-agent/agents/factor_registry.py` | Manage factor definitions, composite factor configs, and source metadata |
+| Factor expression | `quant-agent/agents/factor_expression.py` | Safely execute parameterized formulas emitted by FactorGenerationAgent |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | Generate candidate factor definitions |
 | ExperimentAgent | `quant-agent/agents/experiment_agent.py` | Batch-evaluate multiple factors from one factor manifest |
 | ExperimentStore | `quant-agent/agents/experiment_store.py` | Persist experiment results, summaries, history index, lineage metadata, and query results |
@@ -932,13 +936,11 @@ print(response.output["storage_stats"]["summary_path"])
 The ExperimentAgent MVP evaluates existing factor columns from a saved factor
 manifest and stores JSON, CSV, JSONL history, and lineage artifacts. Lineage
 captures git commit, dirty state, config hash, factor manifest hash, and a data
-version fingerprint. It does not yet execute parameterized generated formulas
-directly.
+version fingerprint.
 
 It can also generate candidate factors first, map each candidate's
-`source_template_id` to executable FeatureAgent templates, save a factor
-manifest, and batch-backtest the resulting factor columns. The parameterized
-formula execution engine is still future work.
+parameterized expression through the restricted FactorExpression engine, save a
+factor manifest, and batch-backtest the resulting `factor__alpha_*` columns.
 
 ```python
 from agents.experiment_agent import ExperimentAgent
@@ -955,7 +957,7 @@ response = ExperimentAgent().run(
         }
     )
 )
-print(response.output["candidate_generation"]["executable_mapping"])
+print(response.output["candidate_generation"]["execution"])
 print(response.output["factor_manifest_path"])
 ```
 
@@ -1045,7 +1047,6 @@ backtest JSON per split plus:
 The roadmap lives in `TODO.md`. The next priorities are:
 
 - extend out-of-sample validation with walk-forward, decay, and robustness checks
-- add parameterized generated-formula execution
 - add factor correlation analysis and multi-factor alpha selection
 - build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions
 - build PortfolioAgent, paper trading logs, dashboard filters, and watchlist workflows

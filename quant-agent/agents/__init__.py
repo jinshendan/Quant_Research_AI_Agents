@@ -79,6 +79,10 @@ from agents.factor_registry import (
     FactorDefinition,
     FactorDefinitionRegistry,
 )
+from agents.factor_expression import (
+    GeneratedFactorExpression,
+    evaluate_factor_expression,
+)
 from agents.factor_store import (
     FactorMatrixStore,
     FactorStorageContext,
@@ -217,6 +221,7 @@ __all__ = [
     "FeatureGenerationResult",
     "FeatureSpec",
     "GeneratedFactor",
+    "GeneratedFactorExpression",
     "HashingTextEmbedder",
     "HypothesisAgent",
     "HypothesisSpec",
@@ -273,6 +278,7 @@ __all__ = [
     "compute_turnover",
     "equal_weight_positions",
     "estimate_transaction_cost",
+    "evaluate_factor_expression",
     "generate_backtest_result_json",
     "format_daily_research_summary",
     "load_daily_research_config",

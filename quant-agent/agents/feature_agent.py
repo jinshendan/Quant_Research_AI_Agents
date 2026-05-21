@@ -20,6 +20,10 @@ from agents.factor_registry import (
     FactorDefinition,
     FactorDefinitionRegistry,
 )
+from agents.factor_expression import (
+    GeneratedFactorExpression,
+    evaluate_factor_expression,
+)
 from agents.factor_store import (
     DEFAULT_FACTOR_SET_NAME,
     FactorMatrixStore,
@@ -51,6 +55,7 @@ class FeatureSpec:
 
     aligned_data_path: Path
     template_ids: tuple[str, ...] = ()
+    generated_factors: tuple[GeneratedFactorExpression, ...] = ()
     composite_factors: tuple[CompositeFactorSpec, ...] = ()
     rolling_features: tuple[str, ...] = ()
     rolling_windows: tuple[int, ...] = ()
@@ -64,6 +69,7 @@ class FeatureSpec:
     def from_payload(cls, payload: Mapping[str, Any]) -> FeatureSpec:
         aligned_data_path = _required_path(payload, "aligned_data_path")
         template_ids = _optional_str_sequence(payload, "template_ids")
+        generated_factors = _optional_generated_factors(payload)
         composite_factors = _optional_composite_factors(payload, "composite_factors")
         rolling_features = _optional_str_sequence(payload, "rolling_features")
         raw_rolling_windows = _optional_int_sequence(payload, "rolling_windows")
@@ -98,6 +104,7 @@ class FeatureSpec:
         return cls(
             aligned_data_path=aligned_data_path,
             template_ids=template_ids,
+            generated_factors=generated_factors,
             composite_factors=composite_factors,
             rolling_features=rolling_features,
             rolling_windows=rolling_windows,
@@ -112,6 +119,10 @@ class FeatureSpec:
         return {
             "aligned_data_path": str(self.aligned_data_path),
             "template_ids": list(self.template_ids),
+            "generated_factors": [
+                generated_factor.to_dict()
+                for generated_factor in self.generated_factors
+            ],
             "composite_factors": [
                 composite_factor.to_dict()
                 for composite_factor in self.composite_factors
@@ -133,6 +144,7 @@ class FeatureGenerationResult:
     data: pd.DataFrame
     factor_columns: tuple[str, ...]
     base_factor_columns: tuple[str, ...]
+    generated_factor_columns: tuple[str, ...]
     composite_factor_columns: tuple[str, ...]
     rolling_feature_columns: tuple[str, ...]
     transformed_factor_columns: tuple[str, ...]
@@ -195,6 +207,7 @@ class FeatureAgent:
                 rolling_feature_names=spec.rolling_features,
                 rolling_windows=spec.rolling_windows,
                 rank_transform_names=spec.rank_transforms,
+                generated_factors=spec.generated_factors,
                 composite_factors=spec.composite_factors,
                 quantile_count=spec.quantile_count,
             )
@@ -238,6 +251,11 @@ class FeatureAgent:
                         source_aligned_data_path=str(spec.aligned_data_path),
                         template_ids=tuple(template_ids),
                         base_factor_columns=result.base_factor_columns,
+                        generated_factor_columns=result.generated_factor_columns,
+                        generated_factor_definitions=tuple(
+                            generated_factor.to_dict()
+                            for generated_factor in spec.generated_factors
+                        ),
                         composite_factor_columns=result.composite_factor_columns,
                         composite_factor_definitions=tuple(
                             composite_factor.to_dict()
@@ -270,9 +288,9 @@ class FeatureAgent:
                         factor_count=len(result.factor_columns),
                         template_count=len(templates),
                         template_ids=template_ids,
-                        composite_count=len(spec.composite_factors),
-                    ),
-                )
+                    composite_count=len(spec.composite_factors),
+                ),
+            )
             self.logger.info(
                 "Saved generated factor matrix.",
                 extra={"action": "save_factors", "status": "success"},
@@ -284,12 +302,17 @@ class FeatureAgent:
                 "state": "features_saved" if storage_result else "features_generated",
                 "request": spec.to_dict(),
                 "template_ids": template_ids,
+                "generated_factors": [
+                    generated_factor.to_dict()
+                    for generated_factor in spec.generated_factors
+                ],
                 "composite_factors": [
                     composite_factor.to_dict()
                     for composite_factor in spec.composite_factors
                 ],
                 "factor_columns": list(result.factor_columns),
                 "base_factor_columns": list(result.base_factor_columns),
+                "generated_factor_columns": list(result.generated_factor_columns),
                 "composite_factor_columns": list(result.composite_factor_columns),
                 "rolling_feature_columns": list(result.rolling_feature_columns),
                 "transformed_factor_columns": list(result.transformed_factor_columns),
@@ -319,6 +342,7 @@ class FeatureAgent:
                 factor_count=len(result.factor_columns),
                 template_count=len(templates),
                 template_ids=template_ids,
+                generated_count=len(spec.generated_factors),
                 composite_count=len(spec.composite_factors),
                 storage_stats=storage_stats,
             ),
@@ -339,11 +363,12 @@ class FeatureAgent:
         rolling_feature_names: Sequence[str] = (),
         rolling_windows: Sequence[int] = (),
         rank_transform_names: Sequence[str] = (),
+        generated_factors: Sequence[GeneratedFactorExpression] = (),
         composite_factors: Sequence[CompositeFactorSpec] = (),
         quantile_count: int = DEFAULT_QUANTILE_COUNT,
     ) -> FeatureGenerationResult:
-        if not templates:
-            msg = "At least one factor template is required."
+        if not templates and not generated_factors:
+            msg = "At least one factor template or generated factor is required."
             raise ValueError(msg)
 
         frame = normalize_aligned_ohlcv(aligned_data)
@@ -356,10 +381,23 @@ class FeatureAgent:
             frame[factor_column] = _mask_untradable_rows(values, frame)
             factor_columns.append(factor_column)
 
+        generated_factor_columns = []
+        for generated_factor in generated_factors:
+            _validate_generated_required_columns(frame, generated_factor)
+            factor_column = generated_factor.factor_column
+            if factor_column in frame.columns or factor_column in factor_columns:
+                msg = f"Generated factor column already exists: {factor_column}."
+                raise ValueError(msg)
+            values = evaluate_factor_expression(frame, generated_factor.expression)
+            frame[factor_column] = _mask_untradable_rows(values, frame)
+            factor_columns.append(factor_column)
+            generated_factor_columns.append(factor_column)
+
         base_factor_columns = tuple(factor_columns)
         composite_factor_columns: tuple[str, ...] = ()
-        factor_definition_registry = FactorDefinitionRegistry.from_templates_and_composites(
+        factor_definition_registry = _factor_definition_registry(
             templates,
+            generated_factors,
             composite_factors,
         )
         if composite_factors:
@@ -414,6 +452,7 @@ class FeatureAgent:
             data=frame[list(IDENTITY_COLUMNS) + factor_columns].copy(),
             factor_columns=tuple(factor_columns),
             base_factor_columns=base_factor_columns,
+            generated_factor_columns=tuple(generated_factor_columns),
             composite_factor_columns=composite_factor_columns,
             rolling_feature_columns=rolling_feature_columns,
             transformed_factor_columns=transformed_factor_columns,
@@ -430,6 +469,8 @@ class FeatureAgent:
     def _templates_for(self, spec: FeatureSpec) -> list[FactorTemplate]:
         if spec.template_ids:
             return [self.template_library.get(template_id) for template_id in spec.template_ids]
+        if spec.generated_factors:
+            return []
         return self.template_library.all()
 
     def _metadata(
@@ -442,6 +483,7 @@ class FeatureAgent:
         factor_count: int | None = None,
         template_count: int | None = None,
         template_ids: Sequence[str] | None = None,
+        generated_count: int | None = None,
         composite_count: int | None = None,
         storage_stats: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -460,6 +502,8 @@ class FeatureAgent:
             metadata["template_count"] = template_count
         if template_ids is not None:
             metadata["template_ids"] = list(template_ids)
+        if generated_count is not None:
+            metadata["generated_count"] = generated_count
         if composite_count is not None:
             metadata["composite_count"] = composite_count
         if storage_stats is not None:
@@ -674,6 +718,40 @@ def _validate_required_columns(frame: pd.DataFrame, template: FactorTemplate) ->
         raise ValueError(msg)
 
 
+def _validate_generated_required_columns(
+    frame: pd.DataFrame,
+    generated_factor: GeneratedFactorExpression,
+) -> None:
+    missing_columns = [
+        column
+        for column in generated_factor.required_columns
+        if column not in frame.columns
+    ]
+    if missing_columns:
+        msg = (
+            f"Generated factor {generated_factor.factor_id} requires missing columns: "
+            f"{', '.join(missing_columns)}."
+        )
+        raise ValueError(msg)
+
+
+def _factor_definition_registry(
+    templates: Sequence[FactorTemplate],
+    generated_factors: Sequence[GeneratedFactorExpression],
+    composite_factors: Sequence[CompositeFactorSpec],
+) -> FactorDefinitionRegistry:
+    definitions = [FactorDefinition.from_template(template) for template in templates]
+    definitions.extend(
+        generated_factor.to_factor_definition()
+        for generated_factor in generated_factors
+    )
+    registry = FactorDefinitionRegistry(definitions)
+    for composite_factor in composite_factors:
+        definitions.append(FactorDefinition.from_composite(composite_factor, registry))
+        registry = FactorDefinitionRegistry(definitions)
+    return registry
+
+
 def _mask_untradable_rows(values: pd.Series, frame: pd.DataFrame) -> pd.Series:
     masked = values.replace([np.inf, -np.inf], np.nan)
     return masked.mask(frame[SUSPENSION_COLUMN])
@@ -816,6 +894,30 @@ def _optional_composite_factors(
         msg = "payload.composite_factors contains duplicate factor names."
         raise ValueError(msg)
     return tuple(composite_factors)
+
+
+def _optional_generated_factors(
+    payload: Mapping[str, Any],
+) -> tuple[GeneratedFactorExpression, ...]:
+    value = payload.get("generated_factors")
+    if value is None:
+        return ()
+    if isinstance(value, str) or not isinstance(value, Sequence):
+        msg = "payload.generated_factors must be a sequence of generated factor objects."
+        raise ValueError(msg)
+
+    generated_factors = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            msg = "payload.generated_factors must contain only generated factor objects."
+            raise ValueError(msg)
+        generated_factors.append(GeneratedFactorExpression.from_mapping(item))
+
+    factor_columns = [generated_factor.factor_column for generated_factor in generated_factors]
+    if len(factor_columns) != len(set(factor_columns)):
+        msg = "payload.generated_factors contains duplicate factor ids."
+        raise ValueError(msg)
+    return tuple(generated_factors)
 
 
 def _optional_int_sequence(payload: Mapping[str, Any], key: str) -> tuple[int, ...]:

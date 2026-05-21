@@ -34,20 +34,22 @@ def test_factor_generation_spec_rejects_invalid_count() -> None:
         FactorGenerationSpec.from_payload({"target_count": 0})
 
 
-def test_factor_candidate_generator_creates_first_50_factors() -> None:
+def test_factor_candidate_generator_creates_default_factor_batch() -> None:
     generator = FactorCandidateGenerator()
     result = generator.generate(FactorGenerationSpec())
     factors = result.factors
 
     assert len(factors) == DEFAULT_FACTOR_COUNT
     assert factors[0].factor_id == "alpha_001"
-    assert factors[-1].factor_id == "alpha_050"
+    assert factors[-1].factor_id == f"alpha_{DEFAULT_FACTOR_COUNT:03d}"
     assert len({factor.factor_id for factor in factors}) == DEFAULT_FACTOR_COUNT
     assert len({factor.expression for factor in factors}) == DEFAULT_FACTOR_COUNT
     assert result.stats["unique_expression_count"] == DEFAULT_FACTOR_COUNT
     assert result.stats["max_lookback_days"] == 60
-    assert result.stats["source_template_counts"]["return_5d"] == 6
+    assert result.stats["source_template_counts"]["return_5d"] >= 6
     assert result.stats["category_counts"]["liquidity"] >= 15
+    assert result.stats["category_counts"]["volume_price"] >= 1
+    assert result.stats["category_counts"]["composite"] >= 1
 
     for factor in factors:
         expression = factor.expression.lower().replace(" ", "")
@@ -98,12 +100,12 @@ def test_factor_candidate_generator_rejects_unavailable_target_count() -> None:
     generator = FactorCandidateGenerator()
     spec = FactorGenerationSpec.from_payload(
         {
-            "target_count": 7,
-            "source_template_ids": ["return_5d"],
+            "target_count": 4,
+            "source_template_ids": ["turnover_rate_zscore_20d"],
         }
     )
 
-    with pytest.raises(ValueError, match="Only 6 candidate factors"):
+    with pytest.raises(ValueError, match="Only 3 candidate factors"):
         generator.generate(spec)
 
 

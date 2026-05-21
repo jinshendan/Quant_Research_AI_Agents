@@ -402,15 +402,15 @@ class ExperimentAgent:
             raise ValueError(msg)
 
         generated_factors = _generated_factor_dicts(generation_response.output)
-        executable_template_ids = _executable_template_ids(generated_factors)
-        if not executable_template_ids:
-            msg = "No generated candidates map to executable positive/negative templates."
+        executable_generated_factors = _executable_generated_factors(generated_factors)
+        if not executable_generated_factors:
+            msg = "No generated positive/negative candidates are available for execution."
             raise ValueError(msg)
 
         factor_set_name = spec.factor_set_name or experiment_id
         feature_payload = {
             "aligned_data_path": str(spec.aligned_data_path),
-            "template_ids": list(executable_template_ids),
+            "generated_factors": [dict(factor) for factor in executable_generated_factors],
             "save_factors": True,
             "factor_set_name": factor_set_name,
             "preview_rows": 0,
@@ -436,10 +436,15 @@ class ExperimentAgent:
             "factor_count": generation_response.output.get("factor_count"),
             "generation_method": generation_response.output.get("generation_method"),
             "generation_stats": generation_response.output.get("generation_stats"),
-            "executable_mapping": {
-                "method": "source_template_id_dedup_v1",
-                "executable_template_ids": list(executable_template_ids),
-                "executable_template_count": len(executable_template_ids),
+            "execution": {
+                "method": "generated_expression_v1",
+                "executable_factor_ids": _generated_factor_ids(
+                    executable_generated_factors
+                ),
+                "executable_factor_columns": _generated_factor_columns(
+                    executable_generated_factors
+                ),
+                "executable_factor_count": len(executable_generated_factors),
                 "generated_candidate_count": len(generated_factors),
                 "skipped_candidate_count": len(generated_factors)
                 - _supported_candidate_count(generated_factors),
@@ -449,6 +454,9 @@ class ExperimentAgent:
             "state": feature_response.output.get("state"),
             "request": feature_payload,
             "template_ids": feature_response.output.get("template_ids"),
+            "generated_factor_columns": feature_response.output.get(
+                "generated_factor_columns"
+            ),
             "factor_columns": feature_response.output.get("factor_columns"),
             "storage_stats": feature_response.output.get("storage_stats"),
         }
@@ -687,17 +695,39 @@ def _generated_factor_dicts(output: Mapping[str, Any]) -> tuple[Mapping[str, Any
     return tuple(normalized)
 
 
-def _executable_template_ids(
+def _executable_generated_factors(
     generated_factors: Sequence[Mapping[str, Any]],
-) -> tuple[str, ...]:
-    template_ids = []
+) -> tuple[Mapping[str, Any], ...]:
+    executable_factors = []
     for factor in generated_factors:
         if factor.get("direction") not in SUPPORTED_FACTOR_DIRECTIONS:
             continue
-        source_template_id = factor.get("source_template_id")
-        if isinstance(source_template_id, str) and source_template_id.strip():
-            template_ids.append(source_template_id.strip())
-    return tuple(dict.fromkeys(template_ids))
+        expression = factor.get("expression")
+        factor_id = factor.get("factor_id")
+        if (
+            isinstance(expression, str)
+            and expression.strip()
+            and isinstance(factor_id, str)
+            and factor_id.strip()
+        ):
+            executable_factors.append(factor)
+    return tuple(executable_factors)
+
+
+def _generated_factor_ids(
+    generated_factors: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    return [
+        str(factor["factor_id"])
+        for factor in generated_factors
+        if isinstance(factor.get("factor_id"), str)
+    ]
+
+
+def _generated_factor_columns(
+    generated_factors: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    return [f"factor__{factor_id}" for factor_id in _generated_factor_ids(generated_factors)]
 
 
 def _supported_candidate_count(generated_factors: Sequence[Mapping[str, Any]]) -> int:

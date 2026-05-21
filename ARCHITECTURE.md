@@ -513,7 +513,7 @@ whether a factor is tradable; it only gives downstream agents consistent
 research metadata for manifests, memory, reports, and future experiment
 comparison.
 
-## Day 11 --- First 50 Factor Candidates
+## Day 11 --- Expanded Factor Candidates
 
 Implemented in `quant-agent/`:
 
@@ -527,13 +527,20 @@ Implemented in `quant-agent/`:
 -   `FactorCandidateGenerator` for in-memory factor batch generation
 -   `FactorGenerationAgent` with standardized `AgentRequest` and
     `AgentResponse` envelopes
--   default generation of `alpha_001` through `alpha_050`
+-   default generation of `alpha_001` through `alpha_090`
+-   candidate families across momentum, reversal, volume-price, volatility,
+    liquidity, breakout, risk-adjusted momentum, and composite signals
+-   parameterized candidates for 1/3/5/10/20/60-day returns, risk-adjusted
+    relative strength, trend slope, gap reversal, overheat pullback, price-volume
+    divergence, amount breakout, volatility contraction, amount stability,
+    impact-cost proxy, moving-average breakout, pullback breakout, and weighted
+    momentum-volume combinations
 -   source-template filtering for focused candidate batches
 -   future-looking expression guardrails for obvious `future_`, `lead(...)`,
     and negative-shift tokens
 -   generation statistics for category counts, source-template counts, unique
     expression count, and maximum lookback
--   tests for spec validation, default 50-factor generation, filtering,
+-   tests for spec validation, default factor-batch generation, filtering,
     unknown sources, insufficient candidates, agent responses, and future-token
     rejection
 
@@ -541,7 +548,7 @@ Current FactorGenerationAgent payload:
 
 ```json
 {
-  "target_count": 50,
+  "target_count": 90,
   "source_template_ids": []
 }
 ```
@@ -556,9 +563,9 @@ factors[]
 generation_stats
 ```
 
-Day 11 generates symbolic candidate definitions only. It does not rank factors,
-persist generated matrices, execute all generated formulas in FeatureAgent, or
-evaluate alpha performance. Those remain scoped to Days 12-14 and Week 3.
+Day 11 generates symbolic candidate definitions only. Formula execution is now
+implemented by the post-MVP FactorExpression path and used by ExperimentAgent
+for generated experiments.
 
 ## Day 12 --- Ranking Transforms
 
@@ -1575,13 +1582,20 @@ is weak. DecisionAgent remains the next layer for watchlist-level decisions.
 Implemented in `quant-agent/`:
 
 -   `ExperimentAgent` in `agents/experiment_agent.py`
+-   `GeneratedFactorExpression` and `evaluate_factor_expression(...)` in
+    `agents/factor_expression.py`
 -   `ExperimentSpec` request validation for batch factor experiments
 -   `ExperimentStore` in `agents/experiment_store.py`
 -   batch evaluation of multiple factor columns from one saved factor manifest
 -   optional generated-experiment path:
     `FactorGenerationAgent -> FeatureAgent -> BacktestAgent -> CriticAgent`
--   candidate-to-feature mapping by generated factor `source_template_id`,
-    restricted to positive/negative candidates that FeatureAgent can execute
+-   direct execution of generated candidate formulas through a restricted
+    expression grammar, restricted to positive/negative candidates
+-   supported generated-expression functions include `delay`, `pct_change`,
+    `mean`, `std`, `zscore`, `slope`, `max`, `min`, `max_drawdown`,
+    `safe_divide`, and `abs`
+-   generated factor columns use stable candidate IDs such as
+    `factor__alpha_001`
 -   per-factor orchestration:
     `BacktestAgent -> CriticAgent`
 -   automatic use of factor direction from manifest `factor_definitions` when
@@ -1610,9 +1624,9 @@ Implemented in `quant-agent/`:
     benchmark tests, critic verdict, critic severity, metric snapshot, and
     result path
 -   storage metadata exposing result, summary, and index paths
--   tests for request normalization, batch success/rejection behavior, unknown
-    factor validation, JSON persistence, CSV summary output, and JSONL history
-    indexing
+-   tests for expression execution, request normalization, batch
+    success/rejection behavior, unknown factor validation, JSON persistence,
+    CSV summary output, and JSONL history indexing
 
 Current ExperimentAgent payload:
 
@@ -1661,12 +1675,10 @@ summary
 storage_stats
 ```
 
-The generated-experiment path deliberately maps candidates to existing
-FeatureAgent templates instead of executing arbitrary symbolic expressions.
-It does not yet execute parameterized candidate formulas directly, maintain a
-DuckDB experiment table, or perform walk-forward validation. Those capabilities
-remain in the P1 and P2 TODO items because they need expression execution
-contracts and rolling validation boundaries.
+The generated-experiment path executes the restricted formulas emitted by
+FactorGenerationAgent. It still does not execute arbitrary Python or unknown
+third-party formula syntax. It also does not maintain a DuckDB experiment table
+or perform walk-forward validation; those remain later P2/P8 hardening items.
 
 ## OutOfSampleAgent MVP
 

@@ -63,6 +63,7 @@ def test_feature_spec_normalizes_valid_payload(tmp_path: Path) -> None:
     assert spec.to_dict() == {
         "aligned_data_path": str(path.resolve()),
         "template_ids": ["return_3d", "close_to_open_return"],
+        "generated_factors": [],
         "composite_factors": [],
         "rolling_features": [],
         "rolling_windows": [],
@@ -235,6 +236,89 @@ def test_feature_agent_generate_features_preserves_expected_values() -> None:
         & (result.data["date"] == pd.Timestamp("2024-01-04"))
     ].iloc[0]
     assert pd.isna(suspended_row["factor__close_to_open_return"])
+
+
+def test_feature_agent_executes_generated_factor_expression(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path)
+    agent = FeatureAgent(config=_config(tmp_path))
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "aligned_data_path": str(path),
+                "generated_factors": [
+                    {
+                        "factor_id": "alpha_001",
+                        "family_id": "momentum_return",
+                        "source_template_id": "return_5d",
+                        "name": "One-Day Momentum Return",
+                        "category": "momentum",
+                        "expression": "close / delay(close, 1) - 1",
+                        "direction": "positive",
+                        "required_columns": ["close"],
+                        "parameters": {"window": 1},
+                        "lookback_days": 1,
+                        "signal_tags": ["momentum_return", "return_5d"],
+                        "risk_flags": ["momentum_crowding"],
+                        "generation_method": "deterministic_factor_family_v1",
+                    }
+                ],
+                "save_factors": True,
+                "preview_rows": 0,
+            },
+            task_id="generated-feature-task",
+        )
+    )
+
+    assert response.status == "success"
+    assert response.output["template_ids"] == []
+    assert response.output["generated_factor_columns"] == ["factor__alpha_001"]
+    assert response.output["base_factor_columns"] == ["factor__alpha_001"]
+    assert response.output["factor_definitions"][0]["source_type"] == "generated"
+    assert response.output["factor_definitions"][0]["formula"] == (
+        "close / delay(close, 1) - 1"
+    )
+
+    matrix_path = Path(response.output["storage_stats"]["matrix_path"])
+    matrix = pd.read_csv(matrix_path, dtype={"symbol": str})
+    row = matrix[
+        (matrix["symbol"] == "000001") & (matrix["date"] == "2024-01-02")
+    ].iloc[0]
+    assert row["factor__alpha_001"] == pytest.approx(1 / 11)
+
+    manifest_path = Path(response.output["storage_stats"]["manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["context"]["generated_factor_columns"] == ["factor__alpha_001"]
+    assert manifest["context"]["generated_factor_definitions"][0]["factor_id"] == (
+        "alpha_001"
+    )
+    assert manifest["context"]["factor_definitions"][0]["source_type"] == "generated"
+
+
+def test_feature_agent_rejects_future_looking_generated_expression(tmp_path: Path) -> None:
+    path = _write_aligned_csv(tmp_path)
+    response = FeatureAgent().run(
+        AgentRequest.create(
+            {
+                "aligned_data_path": str(path),
+                "generated_factors": [
+                    {
+                        "factor_id": "bad_alpha",
+                        "name": "Bad Alpha",
+                        "category": "bad",
+                        "expression": "lead(close, 1) / close - 1",
+                        "direction": "positive",
+                        "required_columns": ["close"],
+                        "parameters": {"window": 1},
+                        "lookback_days": 1,
+                    }
+                ],
+            }
+        )
+    )
+
+    assert response.status == "error"
+    assert "future-looking" in str(response.error)
 
 
 def test_feature_agent_generates_weighted_composite_factor() -> None:

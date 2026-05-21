@@ -10,7 +10,7 @@ from agents.factor_templates import FactorDirection
 from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
 
-DEFAULT_FACTOR_COUNT = 50
+DEFAULT_FACTOR_COUNT = 90
 MAX_FACTOR_COUNT = 200
 GENERATION_METHOD = "deterministic_factor_family_v1"
 FORBIDDEN_FACTOR_TOKENS = ("future_", "lead(", "shift(-")
@@ -310,6 +310,10 @@ def _fast_slow_grid(*pairs: tuple[int, int]) -> tuple[Mapping[str, int], ...]:
     )
 
 
+def _mapping_grid(*items: Mapping[str, int]) -> tuple[Mapping[str, int], ...]:
+    return tuple(dict(item) for item in items)
+
+
 def _validate_expression(expression: str) -> None:
     compact_expression = expression.lower().replace(" ", "")
     for token in FORBIDDEN_FACTOR_TOKENS:
@@ -328,7 +332,7 @@ DEFAULT_FACTOR_FAMILIES = (
         risk_flags=("momentum_crowding", "reversal_risk"),
         name_template="{window}D Momentum Return",
         expression_template="close / delay(close, {window}) - 1",
-        parameter_grid=_window_grid(1, 2, 3, 5, 10, 20),
+        parameter_grid=_window_grid(1, 2, 3, 5, 10, 20, 60),
     ),
     FactorFamily(
         family_id="reversal_return",
@@ -450,6 +454,181 @@ DEFAULT_FACTOR_FAMILIES = (
         name_template="{window}D Amount Z-Score",
         expression_template="zscore(amount, window={window})",
         parameter_grid=_window_grid(10, 20),
+    ),
+    FactorFamily(
+        family_id="risk_adjusted_momentum",
+        source_template_id="return_5d",
+        category="momentum",
+        direction="positive",
+        required_columns=("close",),
+        risk_flags=("momentum_crowding", "volatility_scaling_risk"),
+        name_template="{window}D Risk-Adjusted Momentum",
+        expression_template=(
+            "(close / delay(close, {window}) - 1) / "
+            "std(close / delay(close, 1) - 1, 20)"
+        ),
+        parameter_grid=_window_grid(5, 10, 20, 60),
+    ),
+    FactorFamily(
+        family_id="trend_slope",
+        source_template_id="return_5d",
+        category="momentum",
+        direction="positive",
+        required_columns=("close",),
+        risk_flags=("trend_following_crowding", "regime_reversal"),
+        name_template="{window}D Trend Slope",
+        expression_template="slope(close, window={window})",
+        parameter_grid=_window_grid(10, 20, 60),
+    ),
+    FactorFamily(
+        family_id="gap_reversal",
+        source_template_id="close_to_open_return",
+        category="reversal",
+        direction="positive",
+        required_columns=("open", "close"),
+        risk_flags=("overnight_gap_noise", "event_risk"),
+        name_template="{window}D Gap Reversal",
+        expression_template="-1 * (open / delay(close, {window}) - 1)",
+        parameter_grid=_window_grid(1, 2, 3),
+    ),
+    FactorFamily(
+        family_id="overheat_pullback",
+        source_template_id="high_breakout_20d",
+        category="reversal",
+        direction="positive",
+        required_columns=("close", "high"),
+        risk_flags=("short_squeeze_risk", "false_reversal"),
+        name_template="{window}D Overheat Pullback",
+        expression_template="-1 * (close / max(delay(high, 1), {window}) - 1)",
+        parameter_grid=_window_grid(10, 20, 60),
+    ),
+    FactorFamily(
+        family_id="price_volume_divergence",
+        source_template_id="volume_ratio_5d_20d",
+        category="volume_price",
+        direction="negative",
+        required_columns=("close", "volume"),
+        risk_flags=("volume_spike_noise", "event_risk"),
+        name_template="{price_window}D Price Volume Divergence",
+        expression_template=(
+            "(close / delay(close, {price_window}) - 1) - "
+            "(mean(volume, {fast_window}) / mean(volume, {slow_window}) - 1)"
+        ),
+        parameter_grid=_mapping_grid(
+            {"price_window": 5, "fast_window": 3, "slow_window": 20},
+            {"price_window": 10, "fast_window": 5, "slow_window": 20},
+            {"price_window": 20, "fast_window": 5, "slow_window": 60},
+        ),
+    ),
+    FactorFamily(
+        family_id="amount_breakout",
+        source_template_id="amount_growth_5d",
+        category="volume_price",
+        direction="positive",
+        required_columns=("amount",),
+        risk_flags=("block_trade_noise", "liquidity_bias"),
+        name_template="{window}D Amount Breakout",
+        expression_template="amount / max(delay(amount, 1), {window}) - 1",
+        parameter_grid=_window_grid(10, 20, 60),
+    ),
+    FactorFamily(
+        family_id="volatility_contraction",
+        source_template_id="realized_volatility_20d",
+        category="volatility",
+        direction="positive",
+        required_columns=("close",),
+        risk_flags=("low_volatility_trap", "breakout_failure"),
+        name_template="{fast_window}D To {slow_window}D Volatility Contraction",
+        expression_template=(
+            "-1 * (std(close / delay(close, 1) - 1, {fast_window}) / "
+            "std(close / delay(close, 1) - 1, {slow_window}))"
+        ),
+        parameter_grid=_fast_slow_grid((5, 20), (10, 40), (20, 60)),
+    ),
+    FactorFamily(
+        family_id="range_contraction",
+        source_template_id="intraday_range_5d",
+        category="volatility",
+        direction="positive",
+        required_columns=("high", "low", "close"),
+        risk_flags=("volatility_regime_dependence",),
+        name_template="{window}D Range Contraction",
+        expression_template=(
+            "-1 * (((high - low) / close) - mean((high - low) / close, {window}))"
+        ),
+        parameter_grid=_window_grid(5, 10, 20),
+    ),
+    FactorFamily(
+        family_id="amount_stability",
+        source_template_id="amount_zscore_20d",
+        category="liquidity",
+        direction="positive",
+        required_columns=("amount",),
+        risk_flags=("liquidity_bias", "stale_volume_risk"),
+        name_template="{window}D Amount Stability",
+        expression_template="-1 * abs(zscore(amount, window={window}))",
+        parameter_grid=_window_grid(10, 20, 60),
+    ),
+    FactorFamily(
+        family_id="impact_cost_proxy",
+        source_template_id="absolute_return_1d",
+        category="liquidity",
+        direction="positive",
+        required_columns=("close", "amount"),
+        risk_flags=("microcap_liquidity_risk", "event_risk"),
+        name_template="{window}D Impact Cost Proxy",
+        expression_template=(
+            "-1 * mean(abs(close / delay(close, 1) - 1), {window}) / "
+            "mean(amount, {window})"
+        ),
+        parameter_grid=_window_grid(5, 20, 60),
+    ),
+    FactorFamily(
+        family_id="moving_average_breakout",
+        source_template_id="high_breakout_20d",
+        category="breakout",
+        direction="positive",
+        required_columns=("close",),
+        risk_flags=("false_breakout", "trend_crowding"),
+        name_template="{window}D Moving Average Breakout",
+        expression_template="close / mean(close, {window}) - 1",
+        parameter_grid=_window_grid(10, 20, 60),
+    ),
+    FactorFamily(
+        family_id="pullback_breakout",
+        source_template_id="high_breakout_20d",
+        category="breakout",
+        direction="positive",
+        required_columns=("close", "high"),
+        risk_flags=("false_breakout", "pullback_failure"),
+        name_template="{breakout_window}D Pullback Breakout",
+        expression_template=(
+            "(close / max(delay(high, 1), {breakout_window}) - 1) - "
+            "abs(close / max(close, {pullback_window}) - 1)"
+        ),
+        parameter_grid=_mapping_grid(
+            {"breakout_window": 20, "pullback_window": 5},
+            {"breakout_window": 40, "pullback_window": 10},
+            {"breakout_window": 60, "pullback_window": 20},
+        ),
+    ),
+    FactorFamily(
+        family_id="momentum_volume_combo",
+        source_template_id="volume_ratio_5d_20d",
+        category="composite",
+        direction="positive",
+        required_columns=("close", "volume"),
+        risk_flags=("multi_signal_weight_risk", "volume_spike_noise"),
+        name_template="{return_window}D Momentum Volume Combo",
+        expression_template=(
+            "0.5 * (close / delay(close, {return_window}) - 1) + "
+            "0.5 * (mean(volume, {fast_window}) / mean(volume, {slow_window}) - 1)"
+        ),
+        parameter_grid=_mapping_grid(
+            {"return_window": 5, "fast_window": 3, "slow_window": 20},
+            {"return_window": 10, "fast_window": 5, "slow_window": 20},
+            {"return_window": 20, "fast_window": 5, "slow_window": 60},
+        ),
     ),
 )
 
