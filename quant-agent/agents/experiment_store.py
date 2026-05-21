@@ -5,6 +5,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,79 @@ class ExperimentStorageResult:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ExperimentQuerySpec:
+    """Filters for reading the experiment history index."""
+
+    experiment_ids: tuple[str, ...] = ()
+    factor_columns: tuple[str, ...] = ()
+    factor_categories: tuple[str, ...] = ()
+    factor_source_types: tuple[str, ...] = ()
+    benchmark_statuses: tuple[str, ...] = ()
+    critic_verdicts: tuple[str, ...] = ()
+    experiment_statuses: tuple[str, ...] = ()
+    statuses: tuple[str, ...] = ()
+    factor_set_names: tuple[str, ...] = ()
+    universes: tuple[str, ...] = ()
+    config_hashes: tuple[str, ...] = ()
+    data_versions: tuple[str, ...] = ()
+    factor_manifest_hashes: tuple[str, ...] = ()
+    factor_manifest_paths: tuple[str, ...] = ()
+    source_aligned_data_paths: tuple[str, ...] = ()
+    created_at_start: str | date | datetime | None = None
+    created_at_end: str | date | datetime | None = None
+    limit: int | None = None
+    sort_desc: bool = True
+
+    def __post_init__(self) -> None:
+        if self.limit is not None and self.limit <= 0:
+            msg = "ExperimentQuerySpec.limit must be positive when provided."
+            raise ValueError(msg)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "experiment_ids": list(self.experiment_ids),
+            "factor_columns": list(self.factor_columns),
+            "factor_categories": list(self.factor_categories),
+            "factor_source_types": list(self.factor_source_types),
+            "benchmark_statuses": list(self.benchmark_statuses),
+            "critic_verdicts": list(self.critic_verdicts),
+            "experiment_statuses": list(self.experiment_statuses),
+            "statuses": list(self.statuses),
+            "factor_set_names": list(self.factor_set_names),
+            "universes": list(self.universes),
+            "config_hashes": list(self.config_hashes),
+            "data_versions": list(self.data_versions),
+            "factor_manifest_hashes": list(self.factor_manifest_hashes),
+            "factor_manifest_paths": list(self.factor_manifest_paths),
+            "source_aligned_data_paths": list(self.source_aligned_data_paths),
+            "created_at_start": _date_bound_to_text(self.created_at_start),
+            "created_at_end": _date_bound_to_text(self.created_at_end),
+            "limit": self.limit,
+            "sort_desc": self.sort_desc,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ExperimentQueryResult:
+    """Records returned from an experiment history query."""
+
+    index_path: Path
+    spec: ExperimentQuerySpec
+    total_records: int
+    matched_records: int
+    records: tuple[dict[str, Any], ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index_path": str(self.index_path),
+            "query": self.spec.to_dict(),
+            "total_records": self.total_records,
+            "matched_records": self.matched_records,
+            "records": list(self.records),
+        }
+
+
 class ExperimentStore:
     """File-backed storage for batch factor experiment runs."""
 
@@ -49,6 +123,10 @@ class ExperimentStore:
     def run_dir(self, experiment_id: str) -> Path:
         return self.experiments_dir / _safe_name(experiment_id)
 
+    @property
+    def index_path(self) -> Path:
+        return self.experiments_dir / EXPERIMENT_INDEX_FILENAME
+
     def store(self, document: Mapping[str, Any]) -> ExperimentStorageResult:
         experiment_id = _required_str(document, "experiment_id")
         records = _required_records(document)
@@ -57,7 +135,7 @@ class ExperimentStore:
 
         result_path = run_dir / EXPERIMENT_RESULT_FILENAME
         summary_path = run_dir / EXPERIMENT_SUMMARY_FILENAME
-        index_path = self.experiments_dir / EXPERIMENT_INDEX_FILENAME
+        index_path = self.index_path
 
         temp_result_path = Path(f"{result_path}.tmp")
         temp_result_path.write_text(
@@ -83,6 +161,21 @@ class ExperimentStore:
             index_path=index_path,
             records_written=len(records),
             index_records_written=len(index_records),
+        )
+
+    def query(
+        self,
+        spec: ExperimentQuerySpec | None = None,
+    ) -> ExperimentQueryResult:
+        query_spec = spec or ExperimentQuerySpec()
+        records = _read_index_records(self.index_path)
+        matched = tuple(_filter_index_records(records, query_spec))
+        return ExperimentQueryResult(
+            index_path=self.index_path,
+            spec=query_spec,
+            total_records=len(records),
+            matched_records=len(matched),
+            records=matched,
         )
 
 
@@ -175,6 +268,8 @@ def _build_index_records(
                 "config_hash": _text(lineage.get("config_hash")),
                 "factor_manifest_hash": _text(lineage.get("factor_manifest_hash")),
                 "data_version": _text(lineage.get("data_version")),
+                "factor_set_name": _text(data_version_inputs.get("factor_set_name")),
+                "universe": _text(data_version_inputs.get("universe")),
                 "factor_matrix_path": _text(factor_matrix.get("path")),
                 "source_aligned_data_path": _text(source_aligned_data.get("path")),
                 "output_dir": _text(request.get("output_dir")),
@@ -209,6 +304,128 @@ def _build_index_records(
             }
         )
     return tuple(index_records)
+
+
+def _filter_index_records(
+    records: Sequence[Mapping[str, Any]],
+    spec: ExperimentQuerySpec,
+) -> list[dict[str, Any]]:
+    start = _parse_date_bound(spec.created_at_start, is_end=False)
+    end = _parse_date_bound(spec.created_at_end, is_end=True)
+    matched = [
+        dict(record)
+        for record in records
+        if _matches_query(record, spec, created_at_start=start, created_at_end=end)
+    ]
+    matched.sort(
+        key=lambda record: (
+            _text(record.get("created_at")),
+            _text(record.get("experiment_id")),
+            _text(record.get("factor_column")),
+        ),
+        reverse=spec.sort_desc,
+    )
+    if spec.limit is not None:
+        return matched[: spec.limit]
+    return matched
+
+
+def _matches_query(
+    record: Mapping[str, Any],
+    spec: ExperimentQuerySpec,
+    *,
+    created_at_start: datetime | None,
+    created_at_end: datetime | None,
+) -> bool:
+    field_filters = (
+        ("experiment_id", spec.experiment_ids),
+        ("factor_column", spec.factor_columns),
+        ("factor_category", spec.factor_categories),
+        ("factor_source_type", spec.factor_source_types),
+        ("benchmark_status", spec.benchmark_statuses),
+        ("critic_verdict", spec.critic_verdicts),
+        ("experiment_status", spec.experiment_statuses),
+        ("status", spec.statuses),
+        ("factor_set_name", spec.factor_set_names),
+        ("universe", spec.universes),
+        ("config_hash", spec.config_hashes),
+        ("data_version", spec.data_versions),
+        ("factor_manifest_hash", spec.factor_manifest_hashes),
+        ("factor_manifest_path", spec.factor_manifest_paths),
+        ("source_aligned_data_path", spec.source_aligned_data_paths),
+    )
+    for field_name, allowed_values in field_filters:
+        if allowed_values and _text(record.get(field_name)) not in set(allowed_values):
+            return False
+    return _created_at_in_range(
+        record.get("created_at"),
+        start=created_at_start,
+        end=created_at_end,
+    )
+
+
+def _created_at_in_range(
+    value: Any,
+    *,
+    start: datetime | None,
+    end: datetime | None,
+) -> bool:
+    if start is None and end is None:
+        return True
+    created_at = _parse_record_datetime(value)
+    if created_at is None:
+        return False
+    if start is not None and created_at < start:
+        return False
+    if end is not None and created_at > end:
+        return False
+    return True
+
+
+def _parse_date_bound(
+    value: str | date | datetime | None,
+    *,
+    is_end: bool,
+) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return _to_naive_utc(value)
+    if isinstance(value, date):
+        boundary_time = time.max if is_end else time.min
+        return datetime.combine(value, boundary_time)
+    if not isinstance(value, str) or not value.strip():
+        msg = "Experiment query date bounds must be non-empty strings, dates, or datetimes."
+        raise ValueError(msg)
+    raw = value.strip()
+    if len(raw) == 10:
+        parsed_date = date.fromisoformat(raw)
+        boundary_time = time.max if is_end else time.min
+        return datetime.combine(parsed_date, boundary_time)
+    return _to_naive_utc(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+
+
+def _parse_record_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return _to_naive_utc(datetime.fromisoformat(value.strip().replace("Z", "+00:00")))
+    except ValueError:
+        return None
+
+
+def _to_naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
+
+
+def _date_bound_to_text(value: str | date | datetime | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return value.isoformat()
 
 
 def _replace_index_records(

@@ -4,7 +4,9 @@ import csv
 import json
 from pathlib import Path
 
-from agents.experiment_store import ExperimentStore
+import pytest
+
+from agents.experiment_store import ExperimentQuerySpec, ExperimentStore
 
 
 def test_experiment_store_writes_result_and_summary(tmp_path: Path) -> None:
@@ -22,6 +24,8 @@ def test_experiment_store_writes_result_and_summary(tmp_path: Path) -> None:
             "factor_manifest_hash": "manifest-hash",
             "data_version": "data-version",
             "data_version_inputs": {
+                "factor_set_name": "demo set",
+                "universe": "custom_batch",
                 "factor_matrix": {"path": "/tmp/factors.csv"},
                 "source_aligned_data": {"path": "/tmp/aligned.csv"},
             },
@@ -115,6 +119,8 @@ def test_experiment_store_writes_result_and_summary(tmp_path: Path) -> None:
             "config_hash": "config-hash",
             "factor_manifest_hash": "manifest-hash",
             "data_version": "data-version",
+            "factor_set_name": "demo set",
+            "universe": "custom_batch",
             "factor_matrix_path": "/tmp/factors.csv",
             "source_aligned_data_path": "/tmp/aligned.csv",
             "output_dir": "experiments",
@@ -208,21 +214,119 @@ def test_experiment_store_appends_index_rows_for_different_experiments(
     ]
 
 
+def test_experiment_store_queries_history_index(tmp_path: Path) -> None:
+    store = ExperimentStore(tmp_path / "experiments")
+    store.store(
+        _minimal_document(
+            experiment_id="experiment-a",
+            factor_column="factor__momentum",
+            verdict="track",
+            benchmark_status="passed",
+            category="momentum",
+            created_at="2026-05-20T10:00:00+00:00",
+            factor_set_name="yinlun_watchlist",
+            universe="auto_parts",
+        )
+    )
+    store.store(
+        _minimal_document(
+            experiment_id="experiment-b",
+            factor_column="factor__reversal",
+            verdict="reject_for_now",
+            benchmark_status="failed",
+            category="reversal",
+            created_at="2026-05-21T10:00:00+00:00",
+            factor_set_name="broad_market",
+            universe="CSI500",
+        )
+    )
+
+    result = store.query(
+        ExperimentQuerySpec(
+            factor_categories=("momentum",),
+            benchmark_statuses=("passed",),
+            critic_verdicts=("track",),
+            factor_set_names=("yinlun_watchlist",),
+            universes=("auto_parts",),
+            created_at_start="2026-05-20",
+            created_at_end="2026-05-20",
+        )
+    )
+
+    assert result.total_records == 2
+    assert result.matched_records == 1
+    assert result.records[0]["experiment_id"] == "experiment-a"
+    assert result.records[0]["factor_column"] == "factor__momentum"
+    assert result.records[0]["factor_category"] == "momentum"
+    assert result.to_dict()["query"]["critic_verdicts"] == ["track"]
+
+
+def test_experiment_store_query_sorts_and_limits(tmp_path: Path) -> None:
+    store = ExperimentStore(tmp_path / "experiments")
+    store.store(
+        _minimal_document(
+            experiment_id="experiment-a",
+            factor_column="factor__a",
+            verdict="track",
+            created_at="2026-05-20T10:00:00+00:00",
+        )
+    )
+    store.store(
+        _minimal_document(
+            experiment_id="experiment-b",
+            factor_column="factor__b",
+            verdict="track",
+            created_at="2026-05-21T10:00:00+00:00",
+        )
+    )
+
+    result = store.query(ExperimentQuerySpec(limit=1, sort_desc=False))
+
+    assert result.total_records == 2
+    assert result.matched_records == 1
+    assert result.records[0]["experiment_id"] == "experiment-a"
+
+
+def test_experiment_store_query_handles_missing_index(tmp_path: Path) -> None:
+    result = ExperimentStore(tmp_path / "experiments").query()
+
+    assert result.total_records == 0
+    assert result.matched_records == 0
+    assert result.records == ()
+
+
+def test_experiment_query_spec_rejects_invalid_limit() -> None:
+    with pytest.raises(ValueError, match="limit"):
+        ExperimentQuerySpec(limit=0)
+
+
 def _minimal_document(
     *,
     experiment_id: str,
     factor_column: str,
     verdict: str,
+    benchmark_status: str = "passed",
+    category: str = "unit_test",
+    created_at: str = "2026-05-21T10:00:00+00:00",
+    factor_set_name: str = "unit_test_set",
+    universe: str = "unit_test_universe",
 ) -> dict[str, object]:
     return {
         "experiment_id": experiment_id,
+        "created_at": created_at,
+        "lineage": {
+            "data_version_inputs": {
+                "factor_set_name": factor_set_name,
+                "universe": universe,
+            }
+        },
         "summary": {"status": "success", "factor_count": 1},
         "factor_definitions": [
             {
                 "factor_id": factor_column.removeprefix("factor__"),
                 "factor_column": factor_column,
                 "name": factor_column,
-                "category": "unit_test",
+                "category": category,
             }
         ],
         "records": [
@@ -231,7 +335,7 @@ def _minimal_document(
                 "factor_direction": "positive",
                 "status": "success",
                 "stage": "completed",
-                "benchmark_status": "passed",
+                "benchmark_status": benchmark_status,
                 "critic_verdict": verdict,
                 "critic_severity": "low",
                 "metrics_snapshot": {},

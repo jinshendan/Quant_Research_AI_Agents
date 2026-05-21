@@ -44,7 +44,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | FactorDefinitionRegistry | 已实现 | 为模板因子和组合因子保存公式、假设、类别、来源、lookback、data lag |
 | FactorGenerationAgent | 已实现 | 生成 50 个确定性候选因子 |
 | ExperimentAgent | 已实现 MVP | 批量回测 factor manifest 中的多个因子并调用 CriticAgent 审查 |
-| ExperimentStore | 已实现 MVP | 保存单次实验 JSON、CSV 汇总、JSONL 历史索引和 lineage 元数据 |
+| ExperimentStore | 已实现 MVP | 保存单次实验 JSON、CSV 汇总、JSONL 历史索引、lineage 元数据和历史查询 |
 | BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
 | 交易成本模型 | 已实现 | 佣金、印花税、过户费、滑点、换手率、gross/net 指标 |
 | Benchmark tests | 已实现 | 对回测结果做确定性质量门槛检查，默认检查样本数、RankIC、净夏普、净收益、回撤和分组股票数 |
@@ -71,7 +71,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | Factor registry | `quant-agent/agents/factor_registry.py` | 管理因子定义、组合因子配置和因子来源元数据 |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | 生成候选因子定义 |
 | ExperimentAgent | `quant-agent/agents/experiment_agent.py` | 批量评估 factor manifest 中的多个因子 |
-| ExperimentStore | `quant-agent/agents/experiment_store.py` | 保存实验结果、汇总表、历史索引和 lineage 元数据 |
+| ExperimentStore | `quant-agent/agents/experiment_store.py` | 保存实验结果、汇总表、历史索引、lineage 元数据和查询结果 |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | 统一管理 A 股交易成本假设和换手成本估算 |
 | CriticAgent | `quant-agent/agents/critic_agent.py` | 审查回测质量并解释失败原因 |
@@ -412,6 +412,26 @@ lineage 元数据。lineage 包含 git commit、dirty 状态、配置 hash、fac
 hash 和数据版本指纹。它还没有自动从候选公式生成新 factor manifest；这会在后续
 ExperimentAgent 扩展中完成。
 
+查询历史实验：
+
+```python
+from agents.experiment_store import ExperimentQuerySpec, ExperimentStore
+
+store = ExperimentStore("experiments")
+result = store.query(
+    ExperimentQuerySpec(
+        factor_categories=("momentum",),
+        benchmark_statuses=("passed",),
+        critic_verdicts=("track",),
+        created_at_start="2026-05-01",
+        created_at_end="2026-05-31",
+    )
+)
+
+for record in result.records:
+    print(record["experiment_id"], record["factor_column"], record["mean_rank_ic"])
+```
+
 #### 5. 保存研究记忆并生成报告
 
 ```python
@@ -475,7 +495,7 @@ print(report_response.output["report_path"])
 | 优先级 | 计划 |
 | --- | --- |
 | P0 | 已完成因子选择、组合因子和因子定义注册表 |
-| P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引和 lineage 记录，后续补历史查询和自动候选生成 |
+| P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引、lineage 记录和历史查询，后续补自动候选生成 |
 | P2 | 加入样本外验证、walk-forward validation、因子衰减和稳健性检查 |
 | P3 | 做因子相关性分析、多因子 alpha 选择和候选池管理 |
 | P4 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
@@ -526,7 +546,7 @@ for real-money trading decisions.
 | FactorDefinitionRegistry | Done | Formula, hypothesis, category, source type, lookback, and data-lag metadata for template and composite factors |
 | FactorGenerationAgent | Done | 50 deterministic candidate factors |
 | ExperimentAgent | MVP done | Batch-backtests multiple factors from a factor manifest and critiques them |
-| ExperimentStore | MVP done | Stores experiment JSON, CSV summary, JSONL history index, and lineage metadata |
+| ExperimentStore | MVP done | Stores experiment JSON, CSV summary, JSONL history index, lineage metadata, and query results |
 | BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
 | Transaction cost model | Done | Commission, stamp duty, transfer fee, slippage, turnover, gross/net metrics |
 | Benchmark tests | Done | Deterministic gates over sample size, RankIC, net Sharpe, net return, drawdown, and average leg count |
@@ -553,7 +573,7 @@ for real-money trading decisions.
 | Factor registry | `quant-agent/agents/factor_registry.py` | Manage factor definitions, composite factor configs, and source metadata |
 | FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | Generate candidate factor definitions |
 | ExperimentAgent | `quant-agent/agents/experiment_agent.py` | Batch-evaluate multiple factors from one factor manifest |
-| ExperimentStore | `quant-agent/agents/experiment_store.py` | Persist experiment results, summaries, history index, and lineage metadata |
+| ExperimentStore | `quant-agent/agents/experiment_store.py` | Persist experiment results, summaries, history index, lineage metadata, and query results |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | Centralize A-share cost assumptions and turnover cost estimates |
 | CriticAgent | `quant-agent/agents/critic_agent.py` | Review backtest quality and explain failed gates |
@@ -838,6 +858,21 @@ captures git commit, dirty state, config hash, factor manifest hash, and a data
 version fingerprint. It does not yet generate a new factor manifest from
 symbolic formulas.
 
+Example history query:
+
+```python
+from agents.experiment_store import ExperimentQuerySpec, ExperimentStore
+
+result = ExperimentStore("experiments").query(
+    ExperimentQuerySpec(
+        factor_categories=("momentum",),
+        benchmark_statuses=("passed",),
+        critic_verdicts=("track",),
+    )
+)
+print(result.records)
+```
+
 ### Project Structure
 
 ```text
@@ -864,7 +899,7 @@ symbolic formulas.
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- extend ExperimentAgent with history queries and automatic candidate generation
+- extend ExperimentAgent with automatic candidate generation
 - add out-of-sample, walk-forward, decay, and robustness validation
 - add factor correlation analysis and multi-factor alpha selection
 - build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions

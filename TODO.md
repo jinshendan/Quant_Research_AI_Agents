@@ -29,7 +29,7 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 - 因子主要来自模板，不是真正的批量假设生成和挖掘。
 - Daily pipeline 已修正为必须显式选择目标因子或组合因子，但还没有批量实验闭环。
 - 缺少样本外、walk-forward、因子衰减、分层稳定性和中性化验证。
-- ExperimentAgent / ExperimentStore 已有 MVP、JSONL 历史索引和实验 lineage 记录，但还缺查询能力，不能系统比较几百个候选因子。
+- ExperimentAgent / ExperimentStore 已有 MVP、JSONL 历史索引、实验 lineage 记录和基础查询能力，但还没有自动候选生成闭环。
 - 缺少多因子组合、因子相关性控制和组合 alpha 构建。
 - 缺少面向单只股票的入场、退出、仓位和反证条件。
 
@@ -81,7 +81,7 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
   - [x] 记录实验 ID、运行时间、请求配置、因子定义和 artifact 路径
   - [x] 保存所有实验结果到本地 JSONL 历史索引
   - [x] 记录 git commit、数据版本、配置 hash
-  - [ ] 支持按因子类别、股票池、日期范围和 verdict 查询历史实验
+  - [x] 支持按因子类别、股票池、日期范围和 verdict 查询历史实验
   - [x] 支持对失败实验记录失败原因，避免重复浪费时间
 
 - [ ] 增加候选因子生成空间
@@ -269,11 +269,10 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 
 优先继续完成 P1/P2，而不是继续堆更多简单模板因子：
 
-1. 扩展 ExperimentStore，增加按因子类别、日期范围、benchmark status 和 critic verdict 查询历史实验的能力。
-2. 串联 FactorGenerationAgent 和 FeatureAgent，让 ExperimentAgent 能从候选定义自动生成 factor manifest。
-3. 增加样本外验证和因子衰减测试，防止过拟合。
-4. 增加因子相关性分析，避免重复研究高度相似信号。
-5. 在有了通过验证的候选 alpha 后，再构建 DecisionAgent 来服务银轮股份这类单票观察。
+1. 串联 FactorGenerationAgent 和 FeatureAgent，让 ExperimentAgent 能从候选定义自动生成 factor manifest。
+2. 增加样本外验证和因子衰减测试，防止过拟合。
+3. 增加因子相关性分析，避免重复研究高度相似信号。
+4. 在有了通过验证的候选 alpha 后，再构建 DecisionAgent 来服务银轮股份这类单票观察。
 
 这条路线更接近量化公司 Quant Researcher 的工作方式：先大规模研究和验证因子，
 再讨论具体股票是否值得观察、何时入场、何时退出。

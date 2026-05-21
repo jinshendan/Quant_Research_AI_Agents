@@ -59,6 +59,8 @@ from agents.duckdb_store import (
 )
 from agents.experiment_agent import ExperimentAgent, ExperimentSpec
 from agents.experiment_store import (
+    ExperimentQueryResult,
+    ExperimentQuerySpec,
     ExperimentStorageResult,
     ExperimentStore,
 )
@@ -181,6 +183,8 @@ __all__ = [
     "DuckDBMarketDataStore",
     "DrawdownResult",
     "ExperimentAgent",
+    "ExperimentQueryResult",
+    "ExperimentQuerySpec",
     "ExperimentSpec",
     "ExperimentStorageResult",
     "ExperimentStore",

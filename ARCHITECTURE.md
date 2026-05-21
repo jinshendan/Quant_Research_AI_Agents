@@ -1592,6 +1592,13 @@ Implemented in `quant-agent/`:
     -   stable request configuration hash
     -   factor manifest hash
     -   data version fingerprint from factor matrix and source aligned data
+-   `ExperimentQuerySpec` and `ExperimentQueryResult` for querying
+    `experiments/experiment_index.jsonl`
+-   history filters for experiment ID, factor column, factor category, factor
+    source type, factor set, universe when present, benchmark status, critic
+    verdict, experiment status, result status, config hash, data version,
+    factor manifest hash, factor manifest path, source aligned data path, and
+    created-at range
 -   structured records for status, failed stage, benchmark status, failed
     benchmark tests, critic verdict, critic severity, metric snapshot, and
     result path
@@ -1646,10 +1653,10 @@ storage_stats
 
 The MVP deliberately evaluates factors that already exist in a persisted factor
 manifest. It does not yet generate new candidate formulas, execute those
-formulas through FeatureAgent, maintain a DuckDB experiment table, expose a
-history query API, or perform sample-out validation. Those capabilities remain
-in the P1 and P2 TODO items because they need query contracts and
-train/validation/test boundaries.
+formulas through FeatureAgent, maintain a DuckDB experiment table, or perform
+sample-out validation. Those capabilities remain in the P1 and P2 TODO items
+because they need candidate execution contracts and train/validation/test
+boundaries.
 
 ## Project Output Language
 

@@ -542,6 +542,8 @@ def _build_experiment_lineage(
         "factor_manifest_hash": factor_manifest_hash,
         "factor_matrix": _file_identity(storage.get("matrix_path")),
         "source_aligned_data": _file_identity(context.get("source_aligned_data_path")),
+        "factor_set_name": context.get("factor_set_name"),
+        "universe": context.get("universe") or manifest.get("universe"),
         "factor_columns": _string_list(storage.get("factor_columns")),
         "factor_count": storage.get("factor_count"),
         "rows_written": storage.get("rows_written"),
