@@ -24,8 +24,8 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 - 作为个人实盘前研究辅助工具
 
 当前项目不适合直接作为自动交易系统，也不能单独作为真实资金买卖决策依据。
-它已有基础 train / validation / test 样本外验证，但仍缺少 walk-forward、
-组合管理、实盘风控和完整入场/卖出决策规则。
+它已有基础 train / validation / test 和 walk-forward 样本外验证，但仍缺少
+因子衰减、组合管理、实盘风控和完整入场/卖出决策规则。
 
 ### 已实现功能
 
@@ -48,7 +48,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | ExperimentAgent | 已实现 MVP | 批量回测 factor manifest 或自动生成候选公式，并调用 CriticAgent 审查 |
 | ExperimentStore | 已实现 MVP | 保存单次实验 JSON、CSV 汇总、JSONL 历史索引、lineage 元数据和历史查询 |
 | BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
-| OutOfSampleAgent | 已实现 MVP | 按 train / validation / test 信号日期切分复用 BacktestAgent，并保存样本外验证 JSON 和 CSV 汇总 |
+| OutOfSampleAgent | 已实现 MVP | 按 train / validation / test 或 walk-forward 信号日期切分复用 BacktestAgent，并保存样本外验证 JSON 和 CSV 汇总 |
 | 交易成本模型 | 已实现 | 佣金、印花税、过户费、滑点、换手率、gross/net 指标 |
 | Benchmark tests | 已实现 | 对回测结果做确定性质量门槛检查，默认检查样本数、RankIC、净夏普、净收益、回撤和分组股票数 |
 | CriticAgent | 已实现 | 将 benchmark 失败项翻译成 track/revise/reject 审查结论 |
@@ -77,7 +77,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | ExperimentAgent | `quant-agent/agents/experiment_agent.py` | 批量评估 factor manifest 中的多个因子 |
 | ExperimentStore | `quant-agent/agents/experiment_store.py` | 保存实验结果、汇总表、历史索引、lineage 元数据和查询结果 |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
-| OutOfSampleAgent | `quant-agent/agents/out_of_sample_agent.py` | 按 train / validation / test 切分验证单个因子的样本外表现 |
+| OutOfSampleAgent | `quant-agent/agents/out_of_sample_agent.py` | 按 train / validation / test 或 walk-forward 切分验证单个因子的样本外表现 |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | 统一管理 A 股交易成本假设和换手成本估算 |
 | CriticAgent | `quant-agent/agents/critic_agent.py` | 审查回测质量并解释失败原因 |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | 保存因子研究记录和 FAISS 索引 |
@@ -501,6 +501,33 @@ print(response.output["storage_stats"]["result_path"])
 print(response.output["storage_stats"]["summary_path"])
 ```
 
+也可以用滚动 walk-forward 验证：
+
+```python
+response = OutOfSampleAgent().run(
+    AgentRequest.create(
+        {
+            "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
+            "factor_column": "factor__return_5d",
+            "validation_id": "return_5d_walk_forward_v1",
+            "output_dir": "validations",
+            "walk_forward": {
+                "start_date": "2020-01-01",
+                "end_date": "2025-12-31",
+                "train_window_days": 504,
+                "test_window_days": 126,
+                "step_days": 126
+            },
+            "factor_direction": "positive",
+            "forward_return_days": 1,
+            "quantile_count": 5
+        }
+    )
+)
+
+print(response.output["summary"]["walk_forward_check"])
+```
+
 OutOfSampleAgent 按“信号日期”切分样本。也就是说，`start_date` 和 `end_date`
 限定的是因子信号所在日期，`forward_return_days` 对应的未来收益仍由 BacktestAgent
 按统一逻辑计算。它会为每个 split 保存一个 BacktestAgent 结果 JSON，并额外保存：
@@ -573,7 +600,7 @@ print(report_response.output["report_path"])
 | --- | --- |
 | P0 | 已完成因子选择、组合因子和因子定义注册表 |
 | P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引、lineage 记录、历史查询、候选公式执行和扩展候选空间 |
-| P2 | 已加入基础 train / validation / test 样本外验证；下一步加入 walk-forward、因子衰减和稳健性检查 |
+| P2 | 已加入 train / validation / test 和 walk-forward 样本外验证；下一步加入因子衰减和稳健性检查 |
 | P3 | 做因子相关性分析、多因子 alpha 选择和候选池管理 |
 | P4 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
 | P5 | 构建 PortfolioAgent、paper trading log 和组合风控 |
@@ -603,7 +630,9 @@ It is useful for:
 - supporting human-reviewed daily research
 
 It is not an automated trading system and should not be used as the sole basis
-for real-money trading decisions.
+for real-money trading decisions. It now supports explicit train / validation /
+test and walk-forward out-of-sample validation, while factor decay, portfolio
+management, live risk controls, and complete entry/exit rules remain future work.
 
 ### Implemented Features
 
@@ -626,7 +655,7 @@ for real-money trading decisions.
 | ExperimentAgent | MVP done | Batch-backtests factors from a manifest or generated candidate formulas and critiques them |
 | ExperimentStore | MVP done | Stores experiment JSON, CSV summary, JSONL history index, lineage metadata, and query results |
 | BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
-| OutOfSampleAgent | MVP done | Reuses BacktestAgent over train / validation / test signal-date windows and stores validation JSON plus CSV summaries |
+| OutOfSampleAgent | MVP done | Reuses BacktestAgent over train / validation / test or walk-forward signal-date windows and stores validation JSON plus CSV summaries |
 | Transaction cost model | Done | Commission, stamp duty, transfer fee, slippage, turnover, gross/net metrics |
 | Benchmark tests | Done | Deterministic gates over sample size, RankIC, net Sharpe, net return, drawdown, and average leg count |
 | CriticAgent | Done | Converts failed benchmark gates into track/revise/reject critiques |
@@ -655,7 +684,7 @@ for real-money trading decisions.
 | ExperimentAgent | `quant-agent/agents/experiment_agent.py` | Batch-evaluate multiple factors from one factor manifest |
 | ExperimentStore | `quant-agent/agents/experiment_store.py` | Persist experiment results, summaries, history index, lineage metadata, and query results |
 | BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
-| OutOfSampleAgent | `quant-agent/agents/out_of_sample_agent.py` | Validate one factor across train / validation / test windows |
+| OutOfSampleAgent | `quant-agent/agents/out_of_sample_agent.py` | Validate one factor across train / validation / test or walk-forward windows |
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | Centralize A-share cost assumptions and turnover cost estimates |
 | CriticAgent | `quant-agent/agents/critic_agent.py` | Review backtest quality and explain failed gates |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | Store factor research records and FAISS indexes |
@@ -1012,6 +1041,33 @@ print(response.output["storage_stats"]["result_path"])
 print(response.output["storage_stats"]["summary_path"])
 ```
 
+Example walk-forward validation:
+
+```python
+response = OutOfSampleAgent().run(
+    AgentRequest.create(
+        {
+            "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
+            "factor_column": "factor__return_5d",
+            "validation_id": "return_5d_walk_forward_v1",
+            "output_dir": "validations",
+            "walk_forward": {
+                "start_date": "2020-01-01",
+                "end_date": "2025-12-31",
+                "train_window_days": 504,
+                "test_window_days": 126,
+                "step_days": 126
+            },
+            "factor_direction": "positive",
+            "forward_return_days": 1,
+            "quantile_count": 5
+        }
+    )
+)
+
+print(response.output["summary"]["walk_forward_check"])
+```
+
 OutOfSampleAgent splits by signal date. The future-return horizon is still
 computed by BacktestAgent from the shared aligned price data. It writes one
 backtest JSON per split plus:
@@ -1046,7 +1102,7 @@ backtest JSON per split plus:
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- extend out-of-sample validation with walk-forward, decay, and robustness checks
+- extend out-of-sample validation with decay and robustness checks
 - add factor correlation analysis and multi-factor alpha selection
 - build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions
 - build PortfolioAgent, paper trading logs, dashboard filters, and watchlist workflows

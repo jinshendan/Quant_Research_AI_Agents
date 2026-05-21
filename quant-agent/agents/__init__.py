@@ -142,6 +142,7 @@ from agents.out_of_sample_agent import (
     OutOfSampleSpec,
     OutOfSampleStorageResult,
     ValidationSplitSpec,
+    WalkForwardSpec,
     save_out_of_sample_result,
 )
 from agents.report_agent import (
@@ -260,6 +261,7 @@ __all__ = [
     "TransactionCostSpec",
     "TurnoverBreakdown",
     "ValidationSplitSpec",
+    "WalkForwardSpec",
     "align_to_trading_calendar",
     "apply_ashare_trading_constraints",
     "apply_rank_transforms",

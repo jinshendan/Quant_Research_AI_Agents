@@ -5,7 +5,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal, cast
@@ -35,6 +35,9 @@ MIN_ANNUALIZATION_FACTOR = 1
 MAX_ANNUALIZATION_FACTOR = 366
 SUPPORTED_FACTOR_DIRECTIONS = {"positive", "negative"}
 FactorDirection = Literal["positive", "negative"]
+SplitRole = Literal["train", "validation", "test", "custom"]
+ValidationMethod = Literal["explicit_splits", "walk_forward"]
+SUPPORTED_SPLIT_ROLES = {"train", "validation", "test", "custom"}
 _SAFE_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -45,16 +48,26 @@ class ValidationSplitSpec:
     name: str
     start_date: str
     end_date: str
+    role: SplitRole = "custom"
+    fold_index: int | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> ValidationSplitSpec:
         name = _required_str(value, "name")
         start_date = _required_date(value, "start_date")
         end_date = _required_date(value, "end_date")
+        role = _optional_split_role(value, default=_infer_split_role(name))
+        fold_index = _optional_positive_int(value, "fold_index")
         if date.fromisoformat(start_date) > date.fromisoformat(end_date):
             msg = "split.start_date must be on or before split.end_date."
             raise ValueError(msg)
-        return cls(name=name, start_date=start_date, end_date=end_date)
+        return cls(
+            name=name,
+            start_date=start_date,
+            end_date=end_date,
+            role=role,
+            fold_index=fold_index,
+        )
 
     @property
     def safe_name(self) -> str:
@@ -65,6 +78,82 @@ class ValidationSplitSpec:
             "name": self.name,
             "start_date": self.start_date,
             "end_date": self.end_date,
+            "role": self.role,
+            "fold_index": self.fold_index,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WalkForwardSpec:
+    """Generate rolling train/test signal-date windows."""
+
+    start_date: str
+    end_date: str
+    train_window_days: int
+    test_window_days: int
+    step_days: int
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> WalkForwardSpec:
+        start_date = _required_date(value, "start_date")
+        end_date = _required_date(value, "end_date")
+        spec = cls(
+            start_date=start_date,
+            end_date=end_date,
+            train_window_days=_required_positive_int(value, "train_window_days"),
+            test_window_days=_required_positive_int(value, "test_window_days"),
+            step_days=_required_positive_int(value, "step_days"),
+        )
+        if date.fromisoformat(spec.start_date) > date.fromisoformat(spec.end_date):
+            msg = "walk_forward.start_date must be on or before walk_forward.end_date."
+            raise ValueError(msg)
+        if not spec.to_splits():
+            msg = "walk_forward does not produce any train/test folds."
+            raise ValueError(msg)
+        return spec
+
+    def to_splits(self) -> tuple[ValidationSplitSpec, ...]:
+        splits: list[ValidationSplitSpec] = []
+        start = date.fromisoformat(self.start_date)
+        final = date.fromisoformat(self.end_date)
+        cursor = start
+        fold_index = 1
+        while True:
+            train_start = cursor
+            train_end = train_start + timedelta(days=self.train_window_days - 1)
+            test_start = train_end + timedelta(days=1)
+            test_end = test_start + timedelta(days=self.test_window_days - 1)
+            if test_end > final:
+                break
+            splits.extend(
+                [
+                    ValidationSplitSpec(
+                        name=f"walk_{fold_index:03d}_train",
+                        start_date=train_start.isoformat(),
+                        end_date=train_end.isoformat(),
+                        role="train",
+                        fold_index=fold_index,
+                    ),
+                    ValidationSplitSpec(
+                        name=f"walk_{fold_index:03d}_test",
+                        start_date=test_start.isoformat(),
+                        end_date=test_end.isoformat(),
+                        role="test",
+                        fold_index=fold_index,
+                    ),
+                ]
+            )
+            cursor = cursor + timedelta(days=self.step_days)
+            fold_index += 1
+        return tuple(splits)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+            "train_window_days": self.train_window_days,
+            "test_window_days": self.test_window_days,
+            "step_days": self.step_days,
         }
 
 
@@ -77,6 +166,8 @@ class OutOfSampleSpec:
     validation_id: str = ""
     output_dir: Path = Path(DEFAULT_VALIDATION_OUTPUT_DIR)
     splits: tuple[ValidationSplitSpec, ...] = ()
+    validation_method: ValidationMethod = "explicit_splits"
+    walk_forward: WalkForwardSpec | None = None
     factor_direction: FactorDirection = "positive"
     forward_return_days: int = DEFAULT_FORWARD_RETURN_DAYS
     quantile_count: int = DEFAULT_QUANTILE_COUNT
@@ -92,8 +183,19 @@ class OutOfSampleSpec:
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> OutOfSampleSpec:
-        splits = _required_splits(payload)
+        explicit_splits = _optional_splits(payload)
+        walk_forward = _optional_walk_forward(payload)
+        if explicit_splits and walk_forward is not None:
+            msg = "Provide only one of payload.splits or payload.walk_forward."
+            raise ValueError(msg)
+        if not explicit_splits and walk_forward is None:
+            msg = "payload.splits or payload.walk_forward is required."
+            raise ValueError(msg)
+        splits = explicit_splits or cast(WalkForwardSpec, walk_forward).to_splits()
         _validate_unique_splits(splits)
+        validation_method: ValidationMethod = (
+            "walk_forward" if walk_forward is not None else "explicit_splits"
+        )
         return cls(
             factor_manifest_path=_required_path(payload, "factor_manifest_path"),
             factor_column=_required_str(payload, "factor_column"),
@@ -104,6 +206,8 @@ class OutOfSampleSpec:
                 DEFAULT_VALIDATION_OUTPUT_DIR,
             ),
             splits=splits,
+            validation_method=validation_method,
+            walk_forward=walk_forward,
             factor_direction=_optional_factor_direction(payload),
             forward_return_days=_optional_int(
                 payload,
@@ -161,6 +265,10 @@ class OutOfSampleSpec:
             "validation_id": self.validation_id,
             "output_dir": str(self.output_dir),
             "splits": [split.to_dict() for split in self.splits],
+            "validation_method": self.validation_method,
+            "walk_forward": (
+                self.walk_forward.to_dict() if self.walk_forward is not None else None
+            ),
             "factor_direction": self.factor_direction,
             "forward_return_days": self.forward_return_days,
             "quantile_count": self.quantile_count,
@@ -423,6 +531,8 @@ def _success_record(
     benchmark_tests = _mapping(backtest_output.get("benchmark_tests"))
     return {
         "split_name": split.name,
+        "split_role": split.role,
+        "fold_index": split.fold_index,
         "start_date": split.start_date,
         "end_date": split.end_date,
         "factor_column": factor_column,
@@ -461,6 +571,8 @@ def _error_record(
 ) -> dict[str, Any]:
     return {
         "split_name": split.name,
+        "split_role": split.role,
+        "fold_index": split.fold_index,
         "start_date": split.start_date,
         "end_date": split.end_date,
         "factor_column": factor_column,
@@ -498,6 +610,7 @@ def _validation_summary(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         ],
         "benchmark_status_counts": dict(benchmark_counts),
         "basic_oos_check": _basic_oos_check(successful, failed),
+        "walk_forward_check": _walk_forward_check(records),
     }
 
 
@@ -519,7 +632,7 @@ def _basic_oos_check(
     train_record = _train_record(successful)
     if train_record is None:
         return _not_enough_oos_data("missing_train_split")
-    oos_records = [record for record in successful if record is not train_record]
+    oos_records = _out_of_sample_records(successful, train_record)
     if not oos_records:
         return _not_enough_oos_data("missing_out_of_sample_splits")
 
@@ -528,8 +641,9 @@ def _basic_oos_check(
     if train_mean_rank_ic is None or any(value is None for value in oos_rank_ics):
         return _not_enough_oos_data("missing_rank_ic")
 
+    oos_rank_ic_values = [cast(float, value) for value in oos_rank_ics]
     train_sign = _sign(train_mean_rank_ic)
-    oos_signs = [_sign(cast(float, value)) for value in oos_rank_ics]
+    oos_signs = [_sign(value) for value in oos_rank_ic_values]
     direction_consistent = train_sign != 0 and all(sign == train_sign for sign in oos_signs)
     oos_benchmarks_passed = all(
         record.get("benchmark_status") == "passed" for record in oos_records
@@ -545,7 +659,7 @@ def _basic_oos_check(
         "train_split_name": train_record.get("split_name"),
         "out_of_sample_split_names": [record.get("split_name") for record in oos_records],
         "train_mean_rank_ic": train_mean_rank_ic,
-        "out_of_sample_mean_rank_ic_min": min(cast(list[float], oos_rank_ics)),
+        "out_of_sample_mean_rank_ic_min": min(oos_rank_ic_values),
         "rank_ic_direction_consistent": direction_consistent,
         "out_of_sample_benchmarks_passed": oos_benchmarks_passed,
     }
@@ -566,10 +680,157 @@ def _not_enough_oos_data(reason: str) -> dict[str, Any]:
 
 def _train_record(records: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     for record in records:
+        if record.get("split_role") == "train":
+            return record
+    for record in records:
         split_name = record.get("split_name")
         if isinstance(split_name, str) and split_name.lower() == "train":
             return record
     return records[0] if records else None
+
+
+def _out_of_sample_records(
+    records: Sequence[Mapping[str, Any]],
+    train_record: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    role_based = [
+        record
+        for record in records
+        if record is not train_record and record.get("split_role") != "train"
+    ]
+    if role_based:
+        return role_based
+    return [record for record in records if record is not train_record]
+
+
+def _walk_forward_check(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    grouped: dict[int, list[Mapping[str, Any]]] = {}
+    for record in records:
+        fold_index = record.get("fold_index")
+        if isinstance(fold_index, bool) or not isinstance(fold_index, int):
+            continue
+        grouped.setdefault(fold_index, []).append(record)
+
+    if not grouped:
+        return {
+            "status": "not_applicable",
+            "fold_count": 0,
+            "passed_fold_count": 0,
+            "failed_fold_count": 0,
+            "rank_ic_direction_consistent_count": 0,
+            "test_benchmark_passed_count": 0,
+            "test_mean_rank_ic_min": None,
+            "folds": [],
+        }
+
+    folds = [
+        _walk_forward_fold_summary(fold_index, grouped[fold_index])
+        for fold_index in sorted(grouped)
+    ]
+    passed_fold_count = sum(1 for fold in folds if fold["status"] == "passed")
+    test_rank_ics = [
+        fold["test_mean_rank_ic"]
+        for fold in folds
+        if isinstance(fold.get("test_mean_rank_ic"), int | float)
+    ]
+    return {
+        "status": "passed" if passed_fold_count == len(folds) else "failed",
+        "fold_count": len(folds),
+        "passed_fold_count": passed_fold_count,
+        "failed_fold_count": len(folds) - passed_fold_count,
+        "rank_ic_direction_consistent_count": sum(
+            1 for fold in folds if fold["rank_ic_direction_consistent"] is True
+        ),
+        "test_benchmark_passed_count": sum(
+            1 for fold in folds if fold["test_benchmark_passed"] is True
+        ),
+        "test_mean_rank_ic_min": min(test_rank_ics) if test_rank_ics else None,
+        "folds": folds,
+    }
+
+
+def _walk_forward_fold_summary(
+    fold_index: int,
+    records: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    train_record = _role_record(records, "train")
+    test_record = _role_record(records, "test")
+    base: dict[str, Any] = {
+        "fold_index": fold_index,
+        "train_split_name": train_record.get("split_name") if train_record else None,
+        "test_split_name": test_record.get("split_name") if test_record else None,
+        "train_status": train_record.get("status") if train_record else None,
+        "test_status": test_record.get("status") if test_record else None,
+        "train_benchmark_status": (
+            train_record.get("benchmark_status") if train_record else None
+        ),
+        "test_benchmark_status": test_record.get("benchmark_status") if test_record else None,
+        "train_mean_rank_ic": _metric(train_record, "mean_rank_ic")
+        if train_record
+        else None,
+        "test_mean_rank_ic": _metric(test_record, "mean_rank_ic") if test_record else None,
+        "train_net_sharpe": _metric(train_record, "net_sharpe") if train_record else None,
+        "test_net_sharpe": _metric(test_record, "net_sharpe") if test_record else None,
+        "train_net_total_return": _metric(train_record, "net_total_return")
+        if train_record
+        else None,
+        "test_net_total_return": _metric(test_record, "net_total_return")
+        if test_record
+        else None,
+        "test_max_drawdown_abs": _metric(test_record, "max_drawdown_abs")
+        if test_record
+        else None,
+        "rank_ic_direction_consistent": None,
+        "test_benchmark_passed": False,
+    }
+    if train_record is None or test_record is None:
+        return {
+            **base,
+            "status": "failed",
+            "reason": "missing_train_or_test_split",
+        }
+    if train_record.get("status") != "success" or test_record.get("status") != "success":
+        return {
+            **base,
+            "status": "failed",
+            "reason": "train_or_test_split_failed",
+        }
+
+    train_mean_rank_ic = cast(float | None, base["train_mean_rank_ic"])
+    test_mean_rank_ic = cast(float | None, base["test_mean_rank_ic"])
+    if train_mean_rank_ic is None or test_mean_rank_ic is None:
+        return {
+            **base,
+            "status": "not_enough_data",
+            "reason": "missing_rank_ic",
+        }
+
+    train_sign = _sign(train_mean_rank_ic)
+    test_sign = _sign(test_mean_rank_ic)
+    direction_consistent = train_sign != 0 and test_sign == train_sign
+    test_benchmark_passed = test_record.get("benchmark_status") == "passed"
+    status = "passed" if direction_consistent and test_benchmark_passed else "failed"
+    return {
+        **base,
+        "status": status,
+        "reason": (
+            "rank_ic_direction_and_test_benchmark_passed"
+            if status == "passed"
+            else "rank_ic_direction_or_test_benchmark_failed"
+        ),
+        "rank_ic_direction_consistent": direction_consistent,
+        "test_benchmark_passed": test_benchmark_passed,
+    }
+
+
+def _role_record(
+    records: Sequence[Mapping[str, Any]],
+    role: SplitRole,
+) -> Mapping[str, Any] | None:
+    for record in records:
+        if record.get("split_role") == role:
+            return record
+    return None
 
 
 def _metric(record: Mapping[str, Any], key: str) -> float | None:
@@ -597,6 +858,8 @@ def _summary_rows(records: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         rows.append(
             {
                 "split_name": record.get("split_name"),
+                "split_role": record.get("split_role"),
+                "fold_index": record.get("fold_index"),
                 "start_date": record.get("start_date"),
                 "end_date": record.get("end_date"),
                 "factor_column": record.get("factor_column"),
@@ -703,6 +966,23 @@ def _optional_int(
     return value
 
 
+def _required_positive_int(payload: Mapping[str, Any], key: str) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        msg = f"payload.{key} must be a positive integer."
+        raise ValueError(msg)
+    if value <= 0:
+        msg = f"payload.{key} must be greater than zero."
+        raise ValueError(msg)
+    return value
+
+
+def _optional_positive_int(payload: Mapping[str, Any], key: str) -> int | None:
+    if key not in payload or payload[key] is None:
+        return None
+    return _required_positive_int(payload, key)
+
+
 def _optional_bool(payload: Mapping[str, Any], key: str, default: bool) -> bool:
     value = payload.get(key, default)
     if not isinstance(value, bool):
@@ -721,6 +1001,30 @@ def _optional_factor_direction(payload: Mapping[str, Any]) -> FactorDirection:
         msg = "payload.factor_direction must be either positive or negative."
         raise ValueError(msg)
     return cast(FactorDirection, normalized)
+
+
+def _optional_split_role(payload: Mapping[str, Any], *, default: SplitRole) -> SplitRole:
+    value = payload.get("role", default)
+    if not isinstance(value, str) or not value.strip():
+        msg = "payload.role must be a non-empty string."
+        raise ValueError(msg)
+    normalized = value.strip().lower()
+    if normalized not in SUPPORTED_SPLIT_ROLES:
+        msg = "payload.role must be one of train, validation, test, or custom."
+        raise ValueError(msg)
+    return cast(SplitRole, normalized)
+
+
+def _infer_split_role(name: str) -> SplitRole:
+    normalized = name.strip().lower()
+    for role in ("train", "validation", "test"):
+        if normalized == role:
+            return cast(SplitRole, role)
+        if normalized.endswith(f"_{role}") or normalized.endswith(f"-{role}"):
+            return cast(SplitRole, role)
+        if normalized.endswith(f".{role}"):
+            return cast(SplitRole, role)
+    return "custom"
 
 
 def _optional_benchmark_thresholds(
@@ -772,8 +1076,10 @@ def _optional_mapping_alias(
     return found_value
 
 
-def _required_splits(payload: Mapping[str, Any]) -> tuple[ValidationSplitSpec, ...]:
-    value = payload.get("splits")
+def _optional_splits(payload: Mapping[str, Any]) -> tuple[ValidationSplitSpec, ...]:
+    if "splits" not in payload or payload["splits"] is None:
+        return ()
+    value = payload["splits"]
     if isinstance(value, str) or not isinstance(value, Sequence) or not value:
         msg = "payload.splits must be a non-empty sequence of split objects."
         raise ValueError(msg)
@@ -784,6 +1090,16 @@ def _required_splits(payload: Mapping[str, Any]) -> tuple[ValidationSplitSpec, .
             raise ValueError(msg)
         splits.append(ValidationSplitSpec.from_mapping(item))
     return tuple(splits)
+
+
+def _optional_walk_forward(payload: Mapping[str, Any]) -> WalkForwardSpec | None:
+    if "walk_forward" not in payload or payload["walk_forward"] is None:
+        return None
+    value = payload["walk_forward"]
+    if not isinstance(value, Mapping):
+        msg = "payload.walk_forward must be an object."
+        raise ValueError(msg)
+    return WalkForwardSpec.from_mapping(value)
 
 
 def _validate_unique_splits(splits: Sequence[ValidationSplitSpec]) -> None:

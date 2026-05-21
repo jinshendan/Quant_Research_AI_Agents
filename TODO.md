@@ -29,7 +29,7 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 - 因子主要来自模板，不是真正的批量假设生成和挖掘。
 - Daily pipeline 已修正为必须显式选择目标因子或组合因子；ExperimentAgent 已具备
   批量实验闭环。
-- 已支持基础 train / validation / test 样本外切分，但还缺少 walk-forward、
+- 已支持基础 train / validation / test 和 walk-forward 样本外切分，但还缺少
   因子衰减、分层稳定性和中性化验证。
 - ExperimentAgent / ExperimentStore 已有 MVP、JSONL 历史索引、实验 lineage 记录、
   基础查询能力和自动候选公式执行闭环。
@@ -101,7 +101,7 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 
 - [ ] 增加样本外验证
   - [x] 支持 train / validation / test 日期切分
-  - [ ] 支持 walk-forward validation
+  - [x] 支持 walk-forward validation
   - [ ] 对比样本内和样本外 IC、RankIC、Sharpe、回撤、换手、成本后收益
   - [ ] 在报告中明确标记样本外是否通过
 
@@ -273,7 +273,7 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 
 优先继续完成 P2，而不是继续堆更多简单模板因子：
 
-1. 扩展样本外验证：加入 walk-forward、因子衰减和样本内/样本外差异报告。
+1. 扩展样本外验证：加入因子衰减和样本内/样本外差异报告。
 2. 增加因子相关性分析，避免重复研究高度相似信号。
 3. 在有了通过验证的候选 alpha 后，再构建 DecisionAgent 来服务银轮股份这类单票观察。
 

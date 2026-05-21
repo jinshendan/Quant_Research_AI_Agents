@@ -10,6 +10,7 @@ from agents.out_of_sample_agent import (
     OutOfSampleAgent,
     OutOfSampleSpec,
     ValidationSplitSpec,
+    WalkForwardSpec,
 )
 from core.config import AppConfig
 from core.models import AgentRequest
@@ -128,9 +129,57 @@ def test_out_of_sample_spec_accepts_train_validation_test(tmp_path: Path) -> Non
     assert spec.factor_column == "factor__alpha"
     assert spec.validation_id == "alpha-oos"
     assert [split.name for split in spec.splits] == ["train", "validation", "test"]
+    assert [split.role for split in spec.splits] == ["train", "validation", "test"]
     assert spec.splits[0].start_date == "2024-01-01"
+    assert spec.validation_method == "explicit_splits"
+    assert spec.walk_forward is None
     assert spec.benchmark_thresholds["min_mean_rank_ic"] == 0.9
     assert spec.transaction_costs.enabled is True
+
+
+def test_walk_forward_spec_generates_train_test_splits() -> None:
+    spec = WalkForwardSpec.from_mapping(
+        {
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-06",
+            "train_window_days": 2,
+            "test_window_days": 2,
+            "step_days": 2,
+        }
+    )
+
+    assert [
+        (split.name, split.role, split.fold_index, split.start_date, split.end_date)
+        for split in spec.to_splits()
+    ] == [
+        ("walk_001_train", "train", 1, "2024-01-01", "2024-01-02"),
+        ("walk_001_test", "test", 1, "2024-01-03", "2024-01-04"),
+        ("walk_002_train", "train", 2, "2024-01-03", "2024-01-04"),
+        ("walk_002_test", "test", 2, "2024-01-05", "2024-01-06"),
+    ]
+
+
+def test_out_of_sample_spec_accepts_walk_forward(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "factor_matrix.manifest.json"
+    spec = OutOfSampleSpec.from_payload(
+        {
+            "factor_manifest_path": str(manifest_path),
+            "factor_column": "factor__alpha",
+            "walk_forward": {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-06",
+                "train_window_days": 2,
+                "test_window_days": 2,
+                "step_days": 2,
+            },
+        }
+    )
+
+    assert spec.validation_method == "walk_forward"
+    assert spec.walk_forward is not None
+    assert len(spec.splits) == 4
+    assert [split.role for split in spec.splits] == ["train", "test", "train", "test"]
+    assert [split.fold_index for split in spec.splits] == [1, 1, 2, 2]
 
 
 def test_validation_split_rejects_invalid_date_range() -> None:
@@ -140,6 +189,32 @@ def test_validation_split_rejects_invalid_date_range() -> None:
                 "name": "train",
                 "start_date": "2024-02-01",
                 "end_date": "2024-01-01",
+            }
+        )
+
+
+def test_out_of_sample_spec_rejects_splits_and_walk_forward_together(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="only one"):
+        OutOfSampleSpec.from_payload(
+            {
+                "factor_manifest_path": str(tmp_path / "factor_matrix.manifest.json"),
+                "factor_column": "factor__alpha",
+                "splits": [
+                    {
+                        "name": "train",
+                        "start_date": "2024-01-01",
+                        "end_date": "2024-01-02",
+                    },
+                ],
+                "walk_forward": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-01-06",
+                    "train_window_days": 2,
+                    "test_window_days": 2,
+                    "step_days": 2,
+                },
             }
         )
 
@@ -252,3 +327,79 @@ def test_out_of_sample_agent_runs_split_backtests_and_saves_artifacts(
     saved_summary = pd.read_csv(summary_path)
     assert list(saved_summary["split_name"]) == ["train", "validation", "test"]
     assert saved_summary["benchmark_status"].tolist() == ["passed", "passed", "passed"]
+
+
+def test_out_of_sample_agent_runs_walk_forward_and_saves_artifacts(
+    tmp_path: Path,
+) -> None:
+    aligned_path = _write_aligned_data(tmp_path)
+    factor_matrix_path = _write_factor_matrix(tmp_path)
+    manifest_path = _write_manifest(
+        tmp_path,
+        factor_matrix_path=factor_matrix_path,
+        aligned_data_path=aligned_path,
+    )
+    agent = OutOfSampleAgent(
+        config=AppConfig.from_env(project_root=tmp_path),
+    )
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "factor_manifest_path": str(manifest_path),
+                "factor_column": "factor__alpha",
+                "validation_id": "alpha-walk-forward",
+                "output_dir": "validations",
+                "walk_forward": {
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-01-06",
+                    "train_window_days": 2,
+                    "test_window_days": 2,
+                    "step_days": 2,
+                },
+                "quantile_count": 3,
+                "benchmark_thresholds": _loose_thresholds(),
+                "preview_rows": 1,
+            },
+            task_id="oos-task-2",
+        )
+    )
+
+    assert response.status == "success"
+    assert response.output["request"]["validation_method"] == "walk_forward"
+    assert response.output["summary"]["split_count"] == 4
+    assert response.output["summary"]["successful_split_count"] == 4
+    assert response.output["summary"]["benchmark_status_counts"] == {"passed": 4}
+    assert response.output["summary"]["basic_oos_check"]["status"] == "passed"
+    walk_check = response.output["summary"]["walk_forward_check"]
+    assert walk_check["status"] == "passed"
+    assert walk_check["fold_count"] == 2
+    assert walk_check["passed_fold_count"] == 2
+    assert walk_check["failed_fold_count"] == 0
+    assert walk_check["rank_ic_direction_consistent_count"] == 2
+    assert walk_check["test_benchmark_passed_count"] == 2
+
+    records = response.output["records"]
+    assert [record["split_name"] for record in records] == [
+        "walk_001_train",
+        "walk_001_test",
+        "walk_002_train",
+        "walk_002_test",
+    ]
+    assert [record["split_role"] for record in records] == [
+        "train",
+        "test",
+        "train",
+        "test",
+    ]
+    assert [record["fold_index"] for record in records] == [1, 1, 2, 2]
+    for record in records:
+        assert record["status"] == "success"
+        assert record["benchmark_status"] == "passed"
+        assert record["metrics_snapshot"]["usable_row_count"] == 12
+        assert Path(record["result_json_path"]).is_file()
+
+    summary_path = Path(response.output["storage_stats"]["summary_path"])
+    saved_summary = pd.read_csv(summary_path)
+    assert list(saved_summary["split_role"]) == ["train", "test", "train", "test"]
+    assert saved_summary["fold_index"].tolist() == [1, 1, 2, 2]

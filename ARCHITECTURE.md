@@ -1678,26 +1678,33 @@ storage_stats
 The generated-experiment path executes the restricted formulas emitted by
 FactorGenerationAgent. It still does not execute arbitrary Python or unknown
 third-party formula syntax. It also does not maintain a DuckDB experiment table
-or perform walk-forward validation; those remain later P2/P8 hardening items.
+yet; that remains a later P8 hardening item.
 
 ## OutOfSampleAgent MVP
 
 Implemented in `quant-agent/`:
 
 -   `OutOfSampleAgent` in `agents/out_of_sample_agent.py`
--   `OutOfSampleSpec` and `ValidationSplitSpec` request validation
+-   `OutOfSampleSpec`, `ValidationSplitSpec`, and `WalkForwardSpec` request
+    validation
 -   explicit split windows with `name`, `start_date`, and `end_date`
 -   train / validation / test style validation by reusing BacktestAgent over
     each signal-date window
+-   walk-forward validation that generates rolling train/test folds from
+    `start_date`, `end_date`, `train_window_days`, `test_window_days`, and
+    `step_days`
 -   per-split BacktestAgent JSON artifacts under
     `validations/{validation_id}/backtests/`
 -   validation-level artifact persistence:
     -   `out_of_sample_result.json`
     -   `out_of_sample_summary.csv`
 -   summary fields for successful and failed split counts, benchmark status
-    counts, failed split names, and a basic out-of-sample check
+    counts, failed split names, a basic out-of-sample check, and a
+    walk-forward fold check
 -   the basic out-of-sample check compares train RankIC direction against all
     out-of-sample splits and requires out-of-sample benchmark gates to pass
+-   the walk-forward check compares each fold's train/test RankIC direction and
+    requires the test split benchmark gates to pass
 -   optional `continue_on_error` behavior so one bad split can either stop the
     run or be recorded while other splits continue
 -   structured logs for request validation, split backtests, and storage
@@ -1728,6 +1735,27 @@ Current OutOfSampleAgent payload:
 }
 ```
 
+Current walk-forward payload alternative:
+
+```json
+{
+  "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
+  "factor_column": "factor__return_5d",
+  "validation_id": "return_5d_walk_forward_v1",
+  "output_dir": "validations",
+  "walk_forward": {
+    "start_date": "2020-01-01",
+    "end_date": "2025-12-31",
+    "train_window_days": 504,
+    "test_window_days": 126,
+    "step_days": 126
+  },
+  "factor_direction": "positive",
+  "forward_return_days": 1,
+  "quantile_count": 5
+}
+```
+
 Current OutOfSampleAgent output:
 
 ```text
@@ -1738,6 +1766,7 @@ factor_column
 factor_direction
 records
 summary
+summary.walk_forward_check
 storage_stats
 ```
 
