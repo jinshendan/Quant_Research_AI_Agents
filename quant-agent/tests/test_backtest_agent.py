@@ -108,6 +108,8 @@ def test_backtest_spec_accepts_manifest_only(tmp_path: Path) -> None:
         {
             "factor_manifest_path": str(manifest_path),
             "factor_column": "factor__alpha",
+            "start_date": "2024-01-01",
+            "end_date": "2024-01-31",
             "forward_return_days": 2,
             "quantile_count": 3,
             "benchmark_thresholds": {
@@ -122,6 +124,8 @@ def test_backtest_spec_accepts_manifest_only(tmp_path: Path) -> None:
     assert spec.factor_manifest_path == manifest_path.resolve()
     assert spec.factor_matrix_path is None
     assert spec.factor_column == "factor__alpha"
+    assert spec.start_date == "2024-01-01"
+    assert spec.end_date == "2024-01-31"
     assert spec.forward_return_days == 2
     assert spec.quantile_count == 3
     assert spec.annualization_factor == 252
@@ -136,6 +140,17 @@ def test_backtest_spec_accepts_manifest_only(tmp_path: Path) -> None:
     assert spec.benchmark_thresholds["max_drawdown_abs"] == 0.2
     assert spec.benchmark_thresholds["min_mean_ic"] is None
     assert spec.preview_rows == 0
+
+
+def test_backtest_spec_rejects_invalid_date_range(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="start_date"):
+        BacktestSpec.from_payload(
+            {
+                "factor_manifest_path": str(tmp_path / "factor_matrix.manifest.json"),
+                "start_date": "2024-02-01",
+                "end_date": "2024-01-01",
+            }
+        )
 
 
 def test_backtest_spec_accepts_cost_profile_alias(tmp_path: Path) -> None:
@@ -394,6 +409,52 @@ def test_backtest_agent_uses_single_factor_without_explicit_column(
     }
     assert response.output["result_json_path"] is None
     assert response.output["preview"] == []
+
+
+def test_backtest_agent_filters_signal_date_range(tmp_path: Path) -> None:
+    aligned_path = _write_aligned_data(tmp_path)
+    factor_matrix_path = _write_factor_matrix(tmp_path)
+    manifest_path = _write_manifest(
+        tmp_path,
+        factor_matrix_path=factor_matrix_path,
+        aligned_data_path=aligned_path,
+    )
+
+    response = BacktestAgent().run(
+        AgentRequest.create(
+            {
+                "factor_manifest_path": str(manifest_path),
+                "factor_column": "factor__alpha",
+                "start_date": "2024-01-02",
+                "end_date": "2024-01-02",
+                "quantile_count": 3,
+                "preview_rows": 5,
+                "benchmark_thresholds": {
+                    "min_usable_rows": 6,
+                    "min_portfolio_dates": 1,
+                    "min_ic_dates": 1,
+                    "min_rank_ic_dates": 1,
+                    "min_average_leg_count": 2,
+                    "min_mean_ic": 0.9,
+                    "min_mean_rank_ic": 0.9,
+                    "min_sharpe": None,
+                    "min_total_return": None,
+                    "max_drawdown_abs": None,
+                },
+            }
+        )
+    )
+
+    assert response.status == "success"
+    assert response.output["request"]["start_date"] == "2024-01-02"
+    assert response.output["request"]["end_date"] == "2024-01-02"
+    assert response.output["row_count"] == 6
+    assert response.output["usable_row_count"] == 6
+    assert response.output["portfolio_date_count"] == 1
+    assert response.output["preview"][0]["date"] == "2024-01-02"
+    assert response.output["backtest_stats"]["start_date"] == "2024-01-02"
+    assert response.output["backtest_stats"]["end_date"] == "2024-01-02"
+    assert response.output["result_json"]["inputs"]["start_date"] == "2024-01-02"
 
 
 def test_backtest_agent_requires_factor_column_for_multi_factor_matrix(

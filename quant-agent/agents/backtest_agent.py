@@ -121,6 +121,8 @@ class BacktestSpec:
     aligned_data_path: Path | None = None
     factor_column: str | None = None
     factor_direction: FactorDirection = "positive"
+    start_date: str | None = None
+    end_date: str | None = None
     forward_return_days: int = DEFAULT_FORWARD_RETURN_DAYS
     quantile_count: int = DEFAULT_QUANTILE_COUNT
     annualization_factor: int = DEFAULT_ANNUALIZATION_FACTOR
@@ -149,6 +151,15 @@ class BacktestSpec:
 
         factor_column = _optional_str(payload, "factor_column")
         factor_direction = _optional_factor_direction(payload)
+        start_date = _optional_date(payload, "start_date")
+        end_date = _optional_date(payload, "end_date")
+        if (
+            start_date is not None
+            and end_date is not None
+            and pd.Timestamp(start_date) > pd.Timestamp(end_date)
+        ):
+            msg = "payload.start_date must be on or before payload.end_date."
+            raise ValueError(msg)
         forward_return_days = _optional_int(
             payload,
             "forward_return_days",
@@ -185,6 +196,8 @@ class BacktestSpec:
             aligned_data_path=aligned_data_path,
             factor_column=factor_column,
             factor_direction=factor_direction,
+            start_date=start_date,
+            end_date=end_date,
             forward_return_days=forward_return_days,
             quantile_count=quantile_count,
             annualization_factor=annualization_factor,
@@ -207,6 +220,8 @@ class BacktestSpec:
             ),
             "factor_column": self.factor_column,
             "factor_direction": self.factor_direction,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
             "forward_return_days": self.forward_return_days,
             "quantile_count": self.quantile_count,
             "annualization_factor": self.annualization_factor,
@@ -597,6 +612,8 @@ class BacktestAgent:
                 "aligned_data_path": str(result.aligned_data_path),
                 "factor_column": result.factor_column,
                 "factor_direction": spec.factor_direction,
+                "start_date": spec.start_date,
+                "end_date": spec.end_date,
                 "forward_return_days": spec.forward_return_days,
                 "quantile_count": spec.quantile_count,
                 "annualization_factor": spec.annualization_factor,
@@ -715,6 +732,7 @@ class BacktestAgent:
             panel[FORWARD_RETURN_COLUMN],
             errors="coerce",
         )
+        panel = _filter_panel_by_signal_date(panel, spec)
 
         portfolio_result = _build_portfolio_returns(panel, factor_column, spec)
         if portfolio_result.data.empty:
@@ -916,6 +934,23 @@ def _forward_returns(aligned_data: pd.DataFrame, forward_return_days: int) -> pd
         np.nan,
     )
     return frame[list(IDENTITY_COLUMNS) + [FORWARD_RETURN_COLUMN]]
+
+
+def _filter_panel_by_signal_date(
+    panel: pd.DataFrame,
+    spec: BacktestSpec,
+) -> pd.DataFrame:
+    if spec.start_date is None and spec.end_date is None:
+        return panel
+    filtered = panel
+    if spec.start_date is not None:
+        filtered = filtered.loc[filtered["date"] >= pd.Timestamp(spec.start_date)]
+    if spec.end_date is not None:
+        filtered = filtered.loc[filtered["date"] <= pd.Timestamp(spec.end_date)]
+    if filtered.empty:
+        msg = "No backtest rows remain after applying start_date/end_date."
+        raise ValueError(msg)
+    return filtered.reset_index(drop=True)
 
 
 def _build_portfolio_returns(
@@ -1356,6 +1391,8 @@ def generate_backtest_result_json(
             "aligned_data_path": str(backtest_result.aligned_data_path),
             "factor_column": backtest_result.factor_column,
             "factor_direction": spec.factor_direction,
+            "start_date": spec.start_date,
+            "end_date": spec.end_date,
             "forward_return_days": spec.forward_return_days,
             "quantile_count": spec.quantile_count,
             "annualization_factor": spec.annualization_factor,
@@ -1536,6 +1573,8 @@ def _backtest_stats(
 
     return {
         "factor_column": factor_column,
+        "start_date": _date_string(panel["date"].min()) if not panel.empty else None,
+        "end_date": _date_string(panel["date"].max()) if not panel.empty else None,
         "input_row_count": len(panel),
         "valid_factor_row_count": int(valid_factor.sum()),
         "valid_forward_return_row_count": int(valid_forward_return.sum()),
@@ -1618,6 +1657,20 @@ def _optional_str(payload: Mapping[str, Any], key: str) -> str | None:
         msg = f"payload.{key} must be a non-empty string when provided."
         raise ValueError(msg)
     return value.strip()
+
+
+def _optional_date(payload: Mapping[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        msg = f"payload.{key} must be a non-empty date string when provided."
+        raise ValueError(msg)
+    try:
+        return pd.Timestamp(value.strip()).date().isoformat()
+    except ValueError as exc:
+        msg = f"payload.{key} must be a valid ISO date string."
+        raise ValueError(msg) from exc
 
 
 def _optional_factor_direction(payload: Mapping[str, Any]) -> FactorDirection:

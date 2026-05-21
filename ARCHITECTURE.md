@@ -17,7 +17,7 @@ Build an AI-native quant research platform that continuously:
 # High-Level Architecture
 
 Market Data ↓ DataAgent ↓ HypothesisAgent ↓ FeatureAgent ↓ BacktestAgent
-↓ CriticAgent ↓ MemoryAgent ↓ ReportAgent ↓ Dashboard/UI
+↓ OutOfSampleAgent ↓ CriticAgent ↓ MemoryAgent ↓ ReportAgent ↓ Dashboard/UI
 
 ------------------------------------------------------------------------
 
@@ -702,6 +702,9 @@ Implemented in `quant-agent/`:
 -   long/short factor portfolio return series by date
 -   support for `payload.factor_direction`, `payload.forward_return_days`, and
     `payload.quantile_count`
+-   support for optional `payload.start_date` and `payload.end_date` to filter
+    the signal-date window before portfolio, IC, RankIC, Sharpe, and drawdown
+    calculations
 -   standardized `AgentRequest` and `AgentResponse` envelopes
 -   structured logs for validation and backtest construction
 -   tests for manifest-driven runs, input validation, factor selection, and
@@ -1661,9 +1664,76 @@ storage_stats
 The generated-experiment path deliberately maps candidates to existing
 FeatureAgent templates instead of executing arbitrary symbolic expressions.
 It does not yet execute parameterized candidate formulas directly, maintain a
-DuckDB experiment table, or perform sample-out validation. Those capabilities
+DuckDB experiment table, or perform walk-forward validation. Those capabilities
 remain in the P1 and P2 TODO items because they need expression execution
-contracts and train/validation/test boundaries.
+contracts and rolling validation boundaries.
+
+## OutOfSampleAgent MVP
+
+Implemented in `quant-agent/`:
+
+-   `OutOfSampleAgent` in `agents/out_of_sample_agent.py`
+-   `OutOfSampleSpec` and `ValidationSplitSpec` request validation
+-   explicit split windows with `name`, `start_date`, and `end_date`
+-   train / validation / test style validation by reusing BacktestAgent over
+    each signal-date window
+-   per-split BacktestAgent JSON artifacts under
+    `validations/{validation_id}/backtests/`
+-   validation-level artifact persistence:
+    -   `out_of_sample_result.json`
+    -   `out_of_sample_summary.csv`
+-   summary fields for successful and failed split counts, benchmark status
+    counts, failed split names, and a basic out-of-sample check
+-   the basic out-of-sample check compares train RankIC direction against all
+    out-of-sample splits and requires out-of-sample benchmark gates to pass
+-   optional `continue_on_error` behavior so one bad split can either stop the
+    run or be recorded while other splits continue
+-   structured logs for request validation, split backtests, and storage
+-   tests for spec validation, invalid date ranges, duplicate split names,
+    split backtest orchestration, and artifact persistence
+
+Current OutOfSampleAgent payload:
+
+```json
+{
+  "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
+  "factor_column": "factor__return_5d",
+  "validation_id": "return_5d_oos_v1",
+  "output_dir": "validations",
+  "splits": [
+    {"name": "train", "start_date": "2020-01-01", "end_date": "2022-12-31"},
+    {"name": "validation", "start_date": "2023-01-01", "end_date": "2023-12-31"},
+    {"name": "test", "start_date": "2024-01-01", "end_date": "2025-12-31"}
+  ],
+  "factor_direction": "positive",
+  "forward_return_days": 1,
+  "quantile_count": 5,
+  "benchmark_thresholds": {
+    "min_mean_rank_ic": 0.02,
+    "min_sharpe": 0.5,
+    "max_drawdown_abs": 0.35
+  }
+}
+```
+
+Current OutOfSampleAgent output:
+
+```text
+state = out_of_sample_validated
+validation_id
+validation_status
+factor_column
+factor_direction
+records
+summary
+storage_stats
+```
+
+The split dates are signal dates, not liquidation dates. BacktestAgent still
+constructs forward returns from the shared aligned price data according to
+`forward_return_days`. This keeps the train/validation/test boundary explicit
+for factor signals while preserving a single implementation for return
+construction and benchmark testing.
 
 ## Project Output Language
 

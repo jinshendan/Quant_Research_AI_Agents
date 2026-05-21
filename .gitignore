@@ -17,6 +17,7 @@ quant-agent/.mypy_cache/
 quant-agent/daily_runs/
 quant-agent/daily_rankings/
 quant-agent/experiments/
+quant-agent/validations/
 quant-agent/tmp/
 quant-agent/research_logs/
 quant-agent/results/

@@ -133,6 +133,13 @@ from agents.memory_index import (
     memory_record_to_text,
 )
 from agents.ohlcv_cleaner import OhlcvCleanResult, clean_ohlcv
+from agents.out_of_sample_agent import (
+    OutOfSampleAgent,
+    OutOfSampleSpec,
+    OutOfSampleStorageResult,
+    ValidationSplitSpec,
+    save_out_of_sample_result,
+)
 from agents.report_agent import (
     MarkdownReportResult,
     ReportAgent,
@@ -231,6 +238,9 @@ __all__ = [
     "MemoryStorageResult",
     "MarkdownReportResult",
     "OhlcvCleanResult",
+    "OutOfSampleAgent",
+    "OutOfSampleSpec",
+    "OutOfSampleStorageResult",
     "RankTransformResult",
     "RankTransformSpec",
     "RankInformationCoefficientResult",
@@ -244,6 +254,7 @@ __all__ = [
     "TradingCalendarProvider",
     "TransactionCostSpec",
     "TurnoverBreakdown",
+    "ValidationSplitSpec",
     "align_to_trading_calendar",
     "apply_ashare_trading_constraints",
     "apply_rank_transforms",
@@ -274,6 +285,7 @@ __all__ = [
     "save_markdown_report",
     "save_backtest_result_json",
     "save_daily_stock_ranking",
+    "save_out_of_sample_result",
     "select_memory_record",
     "summarize_factor_wiki_records",
 ]
