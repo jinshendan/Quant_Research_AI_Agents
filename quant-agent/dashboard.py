@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from agents.daily_research import (
+    format_daily_research_summary,
+    load_daily_research_config,
+    run_daily_research,
+)
 from agents.factor_wiki import DEFAULT_FACTOR_WIKI_FILENAME, summarize_factor_wiki_records
 from agents.memory_index import (
     DEFAULT_MEMORY_INDEX_FILENAME,
@@ -19,11 +25,15 @@ from agents.memory_index import (
 from agents.memory_agent import DEFAULT_MEMORY_FILENAME, FactorMemoryStore
 from agents.report_agent import DEFAULT_REPORTS_DIRNAME
 from core.config import AppConfig
-from core.i18n import OutputLanguage, render_label
+from core.i18n import SUPPORTED_OUTPUT_LANGUAGES, OutputLanguage, render_label
 from core.logging import AgentLoggerAdapter, get_agent_logger
 
 DASHBOARD_TITLE = "Quant Research Dashboard"
 DEFAULT_HISTOGRAM_BINS = 10
+DEFAULT_DAILY_RESEARCH_CONFIG_CANDIDATES = (
+    "tmp/yinlun_daily.json",
+    "configs/yinlun_daily.example.json",
+)
 FACTOR_RANKING_COLUMNS = [
     "rank",
     "factor_name",
@@ -203,6 +213,35 @@ class SemanticSearchView:
 
 
 @dataclass(frozen=True, slots=True)
+class DailyResearchDashboardRun:
+    """Dashboard-ready result for a one-click daily research run."""
+
+    status: str
+    run_id: str
+    manifest_path: Path
+    terminal_summary: str
+    summary: dict[str, Any]
+    artifacts: dict[str, Any]
+    error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.status == "success"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "success": self.success,
+            "run_id": self.run_id,
+            "manifest_path": str(self.manifest_path),
+            "terminal_summary": self.terminal_summary,
+            "summary": dict(self.summary),
+            "artifacts": dict(self.artifacts),
+            "error": self.error,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class DashboardData:
     """Loaded dashboard artifacts before Streamlit rendering."""
 
@@ -222,6 +261,45 @@ def default_dashboard_paths(config: AppConfig) -> DashboardPaths:
         ),
         wiki_path=config.memory_dir / DEFAULT_FACTOR_WIKI_FILENAME,
         report_dir=config.project_root / DEFAULT_REPORTS_DIRNAME,
+    )
+
+
+def default_daily_research_config_path(project_root: Path) -> Path:
+    """Return the best available default daily research config path."""
+
+    for relative_path in DEFAULT_DAILY_RESEARCH_CONFIG_CANDIDATES:
+        candidate = project_root / relative_path
+        if candidate.is_file():
+            return candidate
+    return project_root / DEFAULT_DAILY_RESEARCH_CONFIG_CANDIDATES[-1]
+
+
+def run_daily_research_from_config_file(
+    config: AppConfig,
+    config_path: Path,
+    *,
+    output_language: OutputLanguage | None = None,
+) -> DailyResearchDashboardRun:
+    """Run the daily research pipeline from a dashboard-selected config file."""
+
+    spec = load_daily_research_config(config_path)
+    if output_language is not None:
+        spec = replace(spec, output_language=output_language)
+    result = run_daily_research(config, spec)
+    manifest = _load_manifest_document(result.manifest_path)
+    spec_output_language = getattr(spec, "output_language", None)
+    terminal_summary = format_daily_research_summary(
+        result,
+        output_language=output_language or spec_output_language,
+    )
+    return DailyResearchDashboardRun(
+        status=result.status,
+        run_id=result.run_id,
+        manifest_path=result.manifest_path,
+        terminal_summary=terminal_summary,
+        summary=_dict_or_empty(manifest.get("summary")),
+        artifacts=_dict_or_empty(manifest.get("artifacts")),
+        error=result.error,
     )
 
 
@@ -571,13 +649,21 @@ def render_streamlit_dashboard(
         st.caption(_ui_label("Reports", "报告", output_language))
         st.code(str(paths.report_dir))
 
-    dashboard_tab, explorer_tab, search_tab = st.tabs(
+    run_tab, dashboard_tab, explorer_tab, search_tab = st.tabs(
         [
+            _ui_label("One-click Run", "一键运行", output_language),
             _ui_label("Dashboard", "仪表盘", output_language),
             _ui_label("Factor Explorer", "因子浏览", output_language),
             _ui_label("Semantic Search", "语义搜索", output_language),
         ]
     )
+
+    with run_tab:
+        _render_daily_research_runner(
+            st,
+            dashboard_config,
+            output_language=output_language,
+        )
 
     with dashboard_tab:
         metric_columns = st.columns(5)
@@ -791,6 +877,73 @@ def _render_semantic_search(
             )
 
 
+def _render_daily_research_runner(
+    st: Any,
+    config: AppConfig,
+    *,
+    output_language: OutputLanguage,
+) -> None:
+    st.subheader(_ui_label("One-click Daily Research", "一键每日研究", output_language))
+    default_config = default_daily_research_config_path(config.project_root)
+    config_path_text = st.text_input(
+        _ui_label("Config path", "配置文件路径", output_language),
+        value=str(default_config),
+    )
+    language_options = list(SUPPORTED_OUTPUT_LANGUAGES)
+    language_index = (
+        language_options.index(output_language)
+        if output_language in language_options
+        else language_options.index("bilingual")
+    )
+    selected_language = st.selectbox(
+        _ui_label("Output language", "输出语言", output_language),
+        language_options,
+        index=language_index,
+    )
+
+    if st.button(
+        _ui_label("Run daily research", "运行每日研究", output_language),
+        type="primary",
+    ):
+        try:
+            with st.spinner(
+                _ui_label("Running daily research...", "正在运行每日研究...", output_language)
+            ):
+                run_view = run_daily_research_from_config_file(
+                    config,
+                    Path(config_path_text).expanduser(),
+                    output_language=selected_language,
+                )
+        except (OSError, ValueError, RuntimeError) as exc:
+            st.error(str(exc))
+            return
+
+        if run_view.success:
+            st.success(_ui_label("Run completed.", "运行完成。", output_language))
+        else:
+            st.error(_ui_label("Run failed.", "运行失败。", output_language))
+        st.code(run_view.terminal_summary)
+        st.markdown(f"#### {_ui_label('Run Summary', '运行摘要', output_language)}")
+        st.table(
+            _section_frame(
+                {
+                    "status": run_view.status,
+                    "run_id": run_view.run_id,
+                    "manifest_path": str(run_view.manifest_path),
+                    "error": run_view.error,
+                },
+                output_language=output_language,
+            )
+        )
+        st.markdown(f"#### {_ui_label('Artifacts', '产物', output_language)}")
+        if run_view.artifacts:
+            st.table(_section_frame(run_view.artifacts, output_language=output_language))
+        else:
+            st.info(_ui_label("No artifacts recorded.", "未记录产物。", output_language))
+        with st.expander(_ui_label("Manifest summary", "清单摘要", output_language)):
+            st.json(run_view.summary)
+
+
 def _section_frame(
     section: Mapping[str, Any],
     *,
@@ -861,6 +1014,17 @@ def _metric_value(record: Mapping[str, Any], metric: str) -> float | None:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _load_manifest_document(manifest_path: Path) -> dict[str, Any]:
+    if not manifest_path.is_file():
+        return {}
+    value = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return _dict_or_empty(value)
 
 
 def _text_or_na(value: Any) -> str:

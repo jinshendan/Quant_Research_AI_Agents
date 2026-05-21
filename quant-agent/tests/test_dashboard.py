@@ -2,21 +2,27 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+import dashboard
+from agents.daily_research import DailyResearchRunResult
 from agents.memory_index import FactorMemoryVectorIndex
 from agents.memory_agent import FactorMemoryStore
 from core.config import AppConfig
 from dashboard import (
     MarkdownReportSummary,
-    build_semantic_search_view,
     build_dashboard_summary,
+    build_semantic_search_view,
     build_factor_explorer_options,
     build_factor_explorer_view,
     build_factor_ranking_frame,
     build_metric_distribution_frame,
+    default_daily_research_config_path,
     default_dashboard_paths,
     load_dashboard_data,
     load_markdown_report_summaries,
     match_report_summary,
+    run_daily_research_from_config_file,
     run_semantic_memory_search,
     select_factor_record,
 )
@@ -102,6 +108,86 @@ def test_default_dashboard_paths_use_project_artifacts(tmp_path: Path) -> None:
         tmp_path / "memory" / "factor_memory.faiss"
     )
     assert paths.to_dict()["report_dir"] == str(tmp_path / "research_logs")
+
+
+def test_default_daily_research_config_path_prefers_tmp_config(tmp_path: Path) -> None:
+    configs_dir = tmp_path / "configs"
+    tmp_dir = tmp_path / "tmp"
+    configs_dir.mkdir()
+    tmp_dir.mkdir()
+    example_config = configs_dir / "yinlun_daily.example.json"
+    tmp_config = tmp_dir / "yinlun_daily.json"
+    example_config.write_text("{}", encoding="utf-8")
+    tmp_config.write_text("{}", encoding="utf-8")
+
+    assert default_daily_research_config_path(tmp_path) == tmp_config
+
+
+def test_default_daily_research_config_path_falls_back_to_example(
+    tmp_path: Path,
+) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    example_config = configs_dir / "yinlun_daily.example.json"
+    example_config.write_text("{}", encoding="utf-8")
+
+    assert default_daily_research_config_path(tmp_path) == example_config
+
+
+def test_run_daily_research_from_config_file_returns_dashboard_view(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    config_path = tmp_path / "configs" / "daily.json"
+    config_path.parent.mkdir()
+    config_path.write_text("{}", encoding="utf-8")
+    manifest_path = tmp_path / "daily_runs" / "run-1" / "daily_research_manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        """
+        {
+          "summary": {"benchmark_status": "passed"},
+          "artifacts": {"report_path": "daily_runs/run-1/research_report.md"}
+        }
+        """,
+        encoding="utf-8",
+    )
+    loaded_spec = object()
+
+    def fake_load_daily_research_config(path: Path) -> object:
+        assert path == config_path
+        return loaded_spec
+
+    def fake_run_daily_research(
+        received_config: AppConfig,
+        received_spec: object,
+    ) -> DailyResearchRunResult:
+        assert received_config == config
+        assert received_spec is loaded_spec
+        return DailyResearchRunResult(
+            status="success",
+            run_id="run-1",
+            manifest_path=manifest_path,
+            summary={"benchmark_status": "passed"},
+        )
+
+    monkeypatch.setattr(
+        dashboard,
+        "load_daily_research_config",
+        fake_load_daily_research_config,
+    )
+    monkeypatch.setattr(dashboard, "run_daily_research", fake_run_daily_research)
+
+    view = run_daily_research_from_config_file(config, config_path)
+
+    assert view.success is True
+    assert view.status == "success"
+    assert view.run_id == "run-1"
+    assert view.manifest_path == manifest_path
+    assert view.summary == {"benchmark_status": "passed"}
+    assert view.artifacts == {"report_path": "daily_runs/run-1/research_report.md"}
+    assert "benchmark_status: passed" in view.terminal_summary
 
 
 def test_load_dashboard_data_reads_memory_wiki_and_reports(tmp_path: Path) -> None:

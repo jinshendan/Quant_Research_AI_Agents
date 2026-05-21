@@ -1254,6 +1254,11 @@ Implemented in `quant-agent/`:
 
 -   `dashboard.py` Streamlit entrypoint
 -   `DashboardPaths` for memory, wiki, and report artifact locations
+-   `DailyResearchDashboardRun` for one-click daily research runs from the UI
+-   `default_daily_research_config_path(...)` prefers `tmp/yinlun_daily.json`
+    and falls back to `configs/yinlun_daily.example.json`
+-   `run_daily_research_from_config_file(...)` loads a daily research config,
+    runs the existing pipeline in-process, and returns summary/artifact paths
 -   `load_dashboard_data(...)` for loading:
     -   `memory/factor_memory.jsonl`
     -   `memory/factor_wiki.md`
@@ -1261,9 +1266,12 @@ Implemented in `quant-agent/`:
 -   `build_factor_ranking_frame(...)` for ranking factors by RankIC and Sharpe
 -   `build_metric_distribution_frame(...)` for IC and Sharpe histogram data
 -   `build_dashboard_summary(...)` for top-level dashboard counters
+-   a `One-click Run` tab for launching the daily research pipeline without
+    shell commands
 -   structured logs for artifact loading and dashboard rendering
 -   tests for path resolution, artifact loading, factor ranking, metric
-    distributions, report summaries, and dashboard counters
+    distributions, report summaries, one-click run helpers, and dashboard
+    counters
 
 Dashboard command:
 
@@ -1333,6 +1341,7 @@ Implemented in `quant-agent/`:
 Current dashboard tabs:
 
 ```text
+One-click Run
 Dashboard
 Factor Explorer
 Semantic Search

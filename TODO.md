@@ -236,6 +236,7 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 ## P8 --- Dashboard 和自用工作流
 
 - [ ] 改进 dashboard
+  - [x] 增加一键运行 daily research pipeline
   - [ ] 增加实验结果列表
   - [ ] 增加样本外表现过滤
   - [ ] 增加 benchmark status / critic verdict 过滤
@@ -243,6 +244,7 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
   - [ ] 直接展示每日候选股排名和单票决策摘要
 
 - [ ] 增加配置模板
+  - [x] 创建 `configs/yinlun_daily.example.json`
   - [ ] 创建 `configs/daily_research.example.yaml`
   - [ ] 创建 `configs/experiment.example.yaml`
   - [ ] 创建 `configs/cost_profile.example.yaml`

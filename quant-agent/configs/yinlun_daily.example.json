@@ -1,0 +1,53 @@
+{
+  "run_id": "yinlun-002126-daily",
+  "universe": "yinlun_watchlist",
+  "symbols": ["002126", "000338", "002594", "601689", "600741", "000625"],
+  "start_date": "2023-01-01",
+  "end_date": "2026-05-19",
+  "output_dir": "daily_runs",
+  "use_cache": true,
+  "max_retries": 2,
+  "retry_backoff_sec": 0.5,
+  "symbol_sleep_sec": 0.2,
+  "template_ids": ["close_to_open_return", "return_5d", "volume_ratio_5d_20d"],
+  "composite_factors": [
+    {
+      "name": "yinlun_blend_v1",
+      "normalize": "rank_pct",
+      "components": [
+        {"factor": "close_to_open_return", "weight": 0.4},
+        {"factor": "return_5d", "weight": 0.4},
+        {"factor": "volume_ratio_5d_20d", "weight": 0.2}
+      ]
+    }
+  ],
+  "factor_column": "factor__yinlun_blend_v1",
+  "factor_set_name": "yinlun_watchlist",
+  "factor_direction": "positive",
+  "quantile_count": 3,
+  "ranking_top_n": 10,
+  "transaction_costs": {
+    "enabled": true,
+    "profile_name": "a_share_retail_default",
+    "commission_rate": 0.0003,
+    "stamp_duty_rate": 0.0005,
+    "transfer_fee_rate": 0.00001,
+    "slippage_rate": 0.0005
+  },
+  "trading_constraints": {
+    "t_plus_one": true,
+    "exclude_suspended": true,
+    "exclude_limit_up": false,
+    "exclude_limit_down": false,
+    "exclude_st": true,
+    "exclude_new_stock": true,
+    "exclude_delisting_risk": true,
+    "new_stock_min_trading_days": 60
+  },
+  "output_language": "bilingual",
+  "factor_metadata": {
+    "name": "yinlun_blend_v1",
+    "formula": "0.4 * rank_pct(close_to_open_return) + 0.4 * rank_pct(return_5d) + 0.2 * rank_pct(volume_ratio_5d_20d)",
+    "hypothesis": "银轮股份与汽车产业链相关标的中，短期强势和量能变化可能有持续性。"
+  }
+}
