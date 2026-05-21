@@ -409,8 +409,35 @@ print(response.output["storage_stats"]["summary_path"])
 当前 ExperimentAgent MVP 会批量评估已有 factor manifest 中的因子列，逐个调用
 BacktestAgent 和 CriticAgent，并保存实验 JSON、CSV 汇总表、JSONL 历史索引和
 lineage 元数据。lineage 包含 git commit、dirty 状态、配置 hash、factor manifest
-hash 和数据版本指纹。它还没有自动从候选公式生成新 factor manifest；这会在后续
+hash 和数据版本指纹。它还没有直接执行参数化候选公式；这会在后续
 ExperimentAgent 扩展中完成。
+
+也可以让 ExperimentAgent 先生成候选因子，再自动调用 FeatureAgent 保存 factor
+manifest，然后批量回测。当前实现会把候选因子的 `source_template_id` 映射到
+FeatureAgent 已支持的可执行模板；参数化候选公式执行引擎仍是后续任务。
+
+```python
+from agents.experiment_agent import ExperimentAgent
+from core.models import AgentRequest
+
+response = ExperimentAgent().run(
+    AgentRequest.create(
+        {
+            "aligned_data_path": "data/processed/aligned_ohlcv_demo.csv",
+            "candidate_generation": {
+                "target_count": 20,
+                "source_template_ids": ["return_5d", "volume_ratio_5d_20d"],
+            },
+            "factor_set_name": "auto_candidate_batch",
+            "experiment_id": "auto-candidates-v1",
+            "output_dir": "experiments",
+            "quantile_count": 5,
+        }
+    )
+)
+print(response.output["candidate_generation"]["executable_mapping"])
+print(response.output["factor_manifest_path"])
+```
 
 查询历史实验：
 
@@ -495,7 +522,7 @@ print(report_response.output["report_path"])
 | 优先级 | 计划 |
 | --- | --- |
 | P0 | 已完成因子选择、组合因子和因子定义注册表 |
-| P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引、lineage 记录和历史查询，后续补自动候选生成 |
+| P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引、lineage 记录、历史查询和候选生成到可执行模板映射 |
 | P2 | 加入样本外验证、walk-forward validation、因子衰减和稳健性检查 |
 | P3 | 做因子相关性分析、多因子 alpha 选择和候选池管理 |
 | P4 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
@@ -855,8 +882,32 @@ print(response.output["storage_stats"]["summary_path"])
 The ExperimentAgent MVP evaluates existing factor columns from a saved factor
 manifest and stores JSON, CSV, JSONL history, and lineage artifacts. Lineage
 captures git commit, dirty state, config hash, factor manifest hash, and a data
-version fingerprint. It does not yet generate a new factor manifest from
-symbolic formulas.
+version fingerprint. It does not yet execute parameterized generated formulas
+directly.
+
+It can also generate candidate factors first, map each candidate's
+`source_template_id` to executable FeatureAgent templates, save a factor
+manifest, and batch-backtest the resulting factor columns. The parameterized
+formula execution engine is still future work.
+
+```python
+from agents.experiment_agent import ExperimentAgent
+from core.models import AgentRequest
+
+response = ExperimentAgent().run(
+    AgentRequest.create(
+        {
+            "aligned_data_path": "data/processed/aligned_ohlcv_demo.csv",
+            "candidate_generation": {"target_count": 20},
+            "factor_set_name": "auto_candidate_batch",
+            "experiment_id": "auto-candidates-v1",
+            "output_dir": "experiments",
+        }
+    )
+)
+print(response.output["candidate_generation"]["executable_mapping"])
+print(response.output["factor_manifest_path"])
+```
 
 Example history query:
 
@@ -899,8 +950,8 @@ print(result.records)
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- extend ExperimentAgent with automatic candidate generation
 - add out-of-sample, walk-forward, decay, and robustness validation
+- add parameterized generated-formula execution
 - add factor correlation analysis and multi-factor alpha selection
 - build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions
 - build PortfolioAgent, paper trading logs, dashboard filters, and watchlist workflows

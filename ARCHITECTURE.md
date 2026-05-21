@@ -1575,6 +1575,10 @@ Implemented in `quant-agent/`:
 -   `ExperimentSpec` request validation for batch factor experiments
 -   `ExperimentStore` in `agents/experiment_store.py`
 -   batch evaluation of multiple factor columns from one saved factor manifest
+-   optional generated-experiment path:
+    `FactorGenerationAgent -> FeatureAgent -> BacktestAgent -> CriticAgent`
+-   candidate-to-feature mapping by generated factor `source_template_id`,
+    restricted to positive/negative candidates that FeatureAgent can execute
 -   per-factor orchestration:
     `BacktestAgent -> CriticAgent`
 -   automatic use of factor direction from manifest `factor_definitions` when
@@ -1646,17 +1650,20 @@ experiment_status
 factor_count
 successful_factor_count
 failed_factor_count
+factor_manifest_path
+candidate_generation
+feature_generation
 records
 summary
 storage_stats
 ```
 
-The MVP deliberately evaluates factors that already exist in a persisted factor
-manifest. It does not yet generate new candidate formulas, execute those
-formulas through FeatureAgent, maintain a DuckDB experiment table, or perform
-sample-out validation. Those capabilities remain in the P1 and P2 TODO items
-because they need candidate execution contracts and train/validation/test
-boundaries.
+The generated-experiment path deliberately maps candidates to existing
+FeatureAgent templates instead of executing arbitrary symbolic expressions.
+It does not yet execute parameterized candidate formulas directly, maintain a
+DuckDB experiment table, or perform sample-out validation. Those capabilities
+remain in the P1 and P2 TODO items because they need expression execution
+contracts and train/validation/test boundaries.
 
 ## Project Output Language
 

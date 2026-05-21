@@ -69,12 +69,13 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 ## P1 --- 构建 ExperimentAgent：从模板日报升级为因子研究工厂
 
 - [ ] 构建 ExperimentAgent
-  - [ ] 批量生成候选因子实验任务
+  - [x] 批量生成候选因子实验任务
   - [x] 批量运行 BacktestAgent 评估 factor manifest 中的多个因子
   - [x] 批量调用 CriticAgent 审查结果
   - [x] 保存每个实验的 config、因子定义和结果 artifact
   - [x] 输出实验汇总表
-  - [ ] 串联 FeatureAgent，从候选因子定义自动生成 factor manifest
+  - [x] 串联 FeatureAgent，从候选因子定义自动生成 factor manifest
+  - [ ] 支持执行参数化候选公式，而不只是映射到现有可执行模板
 
 - [ ] 增加 ExperimentStore
   - [x] 保存单次实验结果到本地 JSON + CSV summary
@@ -269,9 +270,9 @@ Quant Researcher 的研究流程：系统地产生候选因子，严格验证，
 
 优先继续完成 P1/P2，而不是继续堆更多简单模板因子：
 
-1. 串联 FactorGenerationAgent 和 FeatureAgent，让 ExperimentAgent 能从候选定义自动生成 factor manifest。
-2. 增加样本外验证和因子衰减测试，防止过拟合。
-3. 增加因子相关性分析，避免重复研究高度相似信号。
+1. 增加样本外验证和因子衰减测试，防止过拟合。
+2. 增加因子相关性分析，避免重复研究高度相似信号。
+3. 支持执行参数化候选公式，而不只是映射到现有模板。
 4. 在有了通过验证的候选 alpha 后，再构建 DecisionAgent 来服务银轮股份这类单票观察。
 
 这条路线更接近量化公司 Quant Researcher 的工作方式：先大规模研究和验证因子，

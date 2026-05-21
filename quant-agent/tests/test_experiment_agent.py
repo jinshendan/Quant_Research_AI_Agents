@@ -45,6 +45,22 @@ def test_experiment_spec_normalizes_valid_payload(tmp_path: Path) -> None:
     assert spec.output_language == "zh"
 
 
+def test_experiment_spec_accepts_generated_candidate_payload(tmp_path: Path) -> None:
+    aligned_path = tmp_path / "aligned.csv"
+    spec = ExperimentSpec.from_payload(
+        {
+            "aligned_data_path": str(aligned_path),
+            "candidate_generation": {"target_count": 1},
+            "factor_set_name": "generated demo",
+        }
+    )
+
+    assert spec.factor_manifest_path is None
+    assert spec.aligned_data_path == aligned_path.resolve()
+    assert spec.candidate_generation == {"target_count": 1}
+    assert spec.factor_set_name == "generated demo"
+
+
 def test_experiment_agent_runs_factor_batch_and_writes_artifacts(tmp_path: Path) -> None:
     manifest_path = _write_experiment_fixture(tmp_path)
     agent = ExperimentAgent(config=_config(tmp_path))
@@ -118,6 +134,58 @@ def test_experiment_agent_runs_factor_batch_and_writes_artifacts(tmp_path: Path)
     ]
     assert Path(records[0]["result_json_path"]).is_file()
     assert Path(records[1]["result_json_path"]).is_file()
+
+
+def test_experiment_agent_generates_manifest_from_candidates(tmp_path: Path) -> None:
+    aligned_path = _write_generation_aligned_csv(tmp_path)
+    agent = ExperimentAgent(config=_config(tmp_path))
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "aligned_data_path": str(aligned_path),
+                "candidate_generation": {"target_count": 1},
+                "factor_set_name": "generated demo",
+                "experiment_id": "generated-batch",
+                "output_dir": "experiments",
+                "factor_columns": ["factor__return_5d"],
+                "quantile_count": 3,
+                "benchmark_thresholds": {
+                    "min_usable_rows": 1,
+                    "min_portfolio_dates": 1,
+                    "min_ic_dates": 1,
+                    "min_rank_ic_dates": 1,
+                    "min_average_leg_count": 1,
+                    "min_mean_ic": None,
+                    "min_mean_rank_ic": None,
+                    "min_sharpe": None,
+                    "min_total_return": None,
+                    "max_drawdown_abs": None,
+                },
+                "preview_rows": 0,
+            },
+            task_id="generated-experiment-task",
+        )
+    )
+
+    assert response.status == "success"
+    assert response.output["factor_count"] == 1
+    assert response.output["successful_factor_count"] == 1
+    assert response.output["candidate_generation"]["executable_mapping"][
+        "executable_template_ids"
+    ] == ["return_5d"]
+    assert response.output["feature_generation"]["factor_columns"] == [
+        "factor__return_5d"
+    ]
+    storage = response.output["storage_stats"]
+    saved = json.loads(Path(storage["result_path"]).read_text(encoding="utf-8"))
+    assert saved["factor_manifest_path"].endswith(".manifest.json")
+    assert saved["candidate_generation"]["executable_mapping"][
+        "executable_template_ids"
+    ] == ["return_5d"]
+    assert saved["feature_generation"]["factor_columns"] == ["factor__return_5d"]
+    assert Path(saved["factor_manifest_path"]).is_file()
+    assert Path(saved["records"][0]["result_json_path"]).is_file()
 
 
 def test_experiment_agent_rejects_unknown_factor_column(tmp_path: Path) -> None:
@@ -214,6 +282,38 @@ def _write_experiment_fixture(tmp_path: Path) -> Path:
     }
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     return manifest_path
+
+
+def _write_generation_aligned_csv(tmp_path: Path) -> Path:
+    symbols = tuple(f"{number:06d}" for number in range(1, 7))
+    start = date(2024, 1, 1)
+    rows = []
+    close_by_symbol = {symbol: 100.0 for symbol in symbols}
+    for day_offset in range(12):
+        current = start + timedelta(days=day_offset)
+        for symbol in symbols:
+            signal = _symbol_signal(symbol)
+            close = close_by_symbol[symbol]
+            rows.append(
+                {
+                    "date": current,
+                    "symbol": symbol,
+                    "open": close,
+                    "high": close + 1.0,
+                    "low": close - 1.0,
+                    "close": close,
+                    "volume": 1000.0,
+                    "amount": close * 1000.0,
+                    "turnover_rate": 1.0,
+                    "is_expected_trading_day": True,
+                    "is_suspended_or_missing": False,
+                }
+            )
+            close_by_symbol[symbol] *= 1.0 + signal
+
+    aligned_path = tmp_path / "generated_aligned.csv"
+    pd.DataFrame(rows).to_csv(aligned_path, index=False)
+    return aligned_path
 
 
 def _symbol_signal(symbol: str) -> float:

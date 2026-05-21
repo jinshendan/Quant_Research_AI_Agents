@@ -23,7 +23,9 @@ from agents.experiment_store import (
     ExperimentStorageResult,
     ExperimentStore,
 )
+from agents.factor_generator import FactorGenerationAgent
 from agents.factor_transforms import DEFAULT_QUANTILE_COUNT, validate_quantile_count
+from agents.feature_agent import FeatureAgent
 from agents.transaction_costs import TransactionCostSpec
 from core.config import AppConfig
 from core.i18n import (
@@ -54,7 +56,10 @@ _SAFE_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
 class ExperimentSpec:
     """Validated request for one batch factor experiment run."""
 
-    factor_manifest_path: Path
+    factor_manifest_path: Path | None = None
+    aligned_data_path: Path | None = None
+    candidate_generation: Mapping[str, Any] | None = None
+    factor_set_name: str = ""
     experiment_id: str = ""
     output_dir: Path = Path(DEFAULT_EXPERIMENT_OUTPUT_DIR)
     factor_columns: tuple[str, ...] = ()
@@ -75,8 +80,23 @@ class ExperimentSpec:
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> ExperimentSpec:
+        factor_manifest_path = _optional_input_path(payload, "factor_manifest_path")
+        aligned_data_path = _optional_input_path(payload, "aligned_data_path")
+        candidate_generation = _optional_mapping(payload, "candidate_generation")
+        if factor_manifest_path is None and aligned_data_path is None:
+            msg = "payload.factor_manifest_path or payload.aligned_data_path is required."
+            raise ValueError(msg)
+        if factor_manifest_path is None and candidate_generation is None:
+            msg = (
+                "payload.candidate_generation is required when "
+                "payload.factor_manifest_path is not provided."
+            )
+            raise ValueError(msg)
         return cls(
-            factor_manifest_path=_required_path(payload, "factor_manifest_path"),
+            factor_manifest_path=factor_manifest_path,
+            aligned_data_path=aligned_data_path,
+            candidate_generation=candidate_generation,
+            factor_set_name=_optional_str(payload, "factor_set_name", ""),
             experiment_id=_optional_str(payload, "experiment_id", ""),
             output_dir=_optional_path(
                 payload,
@@ -142,7 +162,18 @@ class ExperimentSpec:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "factor_manifest_path": str(self.factor_manifest_path),
+            "factor_manifest_path": (
+                str(self.factor_manifest_path) if self.factor_manifest_path else None
+            ),
+            "aligned_data_path": (
+                str(self.aligned_data_path) if self.aligned_data_path else None
+            ),
+            "candidate_generation": (
+                dict(self.candidate_generation)
+                if self.candidate_generation is not None
+                else None
+            ),
+            "factor_set_name": self.factor_set_name,
             "experiment_id": self.experiment_id,
             "output_dir": str(self.output_dir),
             "factor_columns": list(self.factor_columns),
@@ -159,6 +190,16 @@ class ExperimentSpec:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedExperimentManifest:
+    """Prepared factor manifest and optional generation-stage metadata."""
+
+    manifest: dict[str, Any]
+    factor_manifest_path: Path
+    candidate_generation: dict[str, Any] | None = None
+    feature_generation: dict[str, Any] | None = None
+
+
 class ExperimentAgent:
     """Batch backtest factor columns and persist experiment summaries."""
 
@@ -172,12 +213,16 @@ class ExperimentAgent:
         store: ExperimentStore | None = None,
         backtest_agent: BacktestAgent | None = None,
         critic_agent: CriticAgent | None = None,
+        factor_generation_agent: FactorGenerationAgent | None = None,
+        feature_agent: FeatureAgent | None = None,
     ) -> None:
         self.config = config or AppConfig.from_env()
         self.logger = logger or get_agent_logger(self.name)
         self.store = store
         self.backtest_agent = backtest_agent or BacktestAgent()
         self.critic_agent = critic_agent or CriticAgent()
+        self.factor_generation_agent = factor_generation_agent or FactorGenerationAgent()
+        self.feature_agent = feature_agent or FeatureAgent(config=self.config)
 
     def run(self, request: AgentRequest) -> AgentResponse:
         started_clock = perf_counter()
@@ -189,7 +234,13 @@ class ExperimentAgent:
 
         try:
             spec = ExperimentSpec.from_payload(request.payload)
-            manifest = _load_manifest(spec.factor_manifest_path)
+            experiment_id = spec.effective_experiment_id
+            prepared_manifest = self._prepare_factor_manifest(
+                request=request,
+                spec=spec,
+                experiment_id=experiment_id,
+            )
+            manifest = prepared_manifest.manifest
             available_factor_columns = _manifest_factor_columns(manifest)
             selected_factor_columns = _selected_factor_columns(
                 spec,
@@ -206,7 +257,6 @@ class ExperimentAgent:
                 metadata=self._metadata(request, elapsed),
             )
 
-        experiment_id = spec.effective_experiment_id
         store = self.store or ExperimentStore(
             spec.resolved_output_dir(self.config.project_root)
         )
@@ -230,6 +280,7 @@ class ExperimentAgent:
             record = self._run_one_factor(
                 request=request,
                 spec=spec,
+                factor_manifest_path=prepared_manifest.factor_manifest_path,
                 factor_column=factor_column,
                 factor_direction=factor_direction,
                 result_json_path=result_json_path,
@@ -244,7 +295,7 @@ class ExperimentAgent:
         lineage = _build_experiment_lineage(
             project_root=self.config.project_root,
             request_config=request_config,
-            factor_manifest_path=spec.factor_manifest_path,
+            factor_manifest_path=prepared_manifest.factor_manifest_path,
             manifest=manifest,
         )
         document = {
@@ -256,7 +307,9 @@ class ExperimentAgent:
             "task_id": request.task_id,
             "request": request_config,
             "lineage": lineage,
-            "factor_manifest_path": str(spec.factor_manifest_path),
+            "candidate_generation": prepared_manifest.candidate_generation,
+            "feature_generation": prepared_manifest.feature_generation,
+            "factor_manifest_path": str(prepared_manifest.factor_manifest_path),
             "available_factor_columns": list(available_factor_columns),
             "selected_factor_columns": list(selected_factor_columns),
             "factor_definitions": [
@@ -299,6 +352,9 @@ class ExperimentAgent:
                 "factor_count": summary["factor_count"],
                 "successful_factor_count": summary["successful_factor_count"],
                 "failed_factor_count": summary["failed_factor_count"],
+                "factor_manifest_path": str(prepared_manifest.factor_manifest_path),
+                "candidate_generation": prepared_manifest.candidate_generation,
+                "feature_generation": prepared_manifest.feature_generation,
                 "records": records,
                 "summary": summary,
                 "storage_stats": storage_result.to_dict(),
@@ -315,11 +371,100 @@ class ExperimentAgent:
             ),
         )
 
+    def _prepare_factor_manifest(
+        self,
+        *,
+        request: AgentRequest,
+        spec: ExperimentSpec,
+        experiment_id: str,
+    ) -> PreparedExperimentManifest:
+        if spec.factor_manifest_path is not None:
+            return PreparedExperimentManifest(
+                manifest=_load_manifest(spec.factor_manifest_path),
+                factor_manifest_path=spec.factor_manifest_path,
+            )
+        if spec.aligned_data_path is None or spec.candidate_generation is None:
+            msg = "aligned_data_path and candidate_generation are required for generated experiments."
+            raise ValueError(msg)
+
+        self.logger.info(
+            "Generating candidate factors for experiment.",
+            extra={"action": "generate_candidates", "status": "running"},
+        )
+        generation_response = self.factor_generation_agent.run(
+            AgentRequest.create(
+                dict(spec.candidate_generation),
+                task_id=f"{request.task_id}-factor-generation",
+            )
+        )
+        if generation_response.status != "success":
+            msg = f"FactorGenerationAgent failed: {generation_response.error}"
+            raise ValueError(msg)
+
+        generated_factors = _generated_factor_dicts(generation_response.output)
+        executable_template_ids = _executable_template_ids(generated_factors)
+        if not executable_template_ids:
+            msg = "No generated candidates map to executable positive/negative templates."
+            raise ValueError(msg)
+
+        factor_set_name = spec.factor_set_name or experiment_id
+        feature_payload = {
+            "aligned_data_path": str(spec.aligned_data_path),
+            "template_ids": list(executable_template_ids),
+            "save_factors": True,
+            "factor_set_name": factor_set_name,
+            "preview_rows": 0,
+        }
+        self.logger.info(
+            "Generating factor manifest for experiment.",
+            extra={"action": "generate_feature_manifest", "status": "running"},
+        )
+        feature_response = self.feature_agent.run(
+            AgentRequest.create(
+                feature_payload,
+                task_id=f"{request.task_id}-feature-generation",
+            )
+        )
+        if feature_response.status != "success":
+            msg = f"FeatureAgent failed: {feature_response.error}"
+            raise ValueError(msg)
+
+        manifest_path = _feature_manifest_path(feature_response.output)
+        candidate_summary = {
+            "state": generation_response.output.get("state"),
+            "request": generation_response.output.get("request"),
+            "factor_count": generation_response.output.get("factor_count"),
+            "generation_method": generation_response.output.get("generation_method"),
+            "generation_stats": generation_response.output.get("generation_stats"),
+            "executable_mapping": {
+                "method": "source_template_id_dedup_v1",
+                "executable_template_ids": list(executable_template_ids),
+                "executable_template_count": len(executable_template_ids),
+                "generated_candidate_count": len(generated_factors),
+                "skipped_candidate_count": len(generated_factors)
+                - _supported_candidate_count(generated_factors),
+            },
+        }
+        feature_summary = {
+            "state": feature_response.output.get("state"),
+            "request": feature_payload,
+            "template_ids": feature_response.output.get("template_ids"),
+            "factor_columns": feature_response.output.get("factor_columns"),
+            "storage_stats": feature_response.output.get("storage_stats"),
+        }
+        return PreparedExperimentManifest(
+            manifest=_load_manifest(manifest_path),
+            factor_manifest_path=manifest_path,
+            candidate_generation=candidate_summary,
+            feature_generation=feature_summary,
+        )
+
     def _run_one_factor(
         self,
         *,
         request: AgentRequest,
         spec: ExperimentSpec,
+        factor_manifest_path: Path,
         factor_column: str,
         factor_direction: FactorDirection,
         result_json_path: Path,
@@ -327,7 +472,7 @@ class ExperimentAgent:
         backtest_response = self.backtest_agent.run(
             AgentRequest.create(
                 {
-                    "factor_manifest_path": str(spec.factor_manifest_path),
+                    "factor_manifest_path": str(factor_manifest_path),
                     "factor_column": factor_column,
                     "factor_direction": factor_direction,
                     "forward_return_days": spec.forward_return_days,
@@ -528,6 +673,50 @@ def _load_manifest(path: Path) -> dict[str, Any]:
     return dict(document)
 
 
+def _generated_factor_dicts(output: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    factors = output.get("factors")
+    if isinstance(factors, str) or not isinstance(factors, Sequence):
+        msg = "FactorGenerationAgent output.factors must be a sequence."
+        raise ValueError(msg)
+    normalized = []
+    for factor in factors:
+        if not isinstance(factor, Mapping):
+            msg = "FactorGenerationAgent output.factors must contain objects."
+            raise ValueError(msg)
+        normalized.append(factor)
+    return tuple(normalized)
+
+
+def _executable_template_ids(
+    generated_factors: Sequence[Mapping[str, Any]],
+) -> tuple[str, ...]:
+    template_ids = []
+    for factor in generated_factors:
+        if factor.get("direction") not in SUPPORTED_FACTOR_DIRECTIONS:
+            continue
+        source_template_id = factor.get("source_template_id")
+        if isinstance(source_template_id, str) and source_template_id.strip():
+            template_ids.append(source_template_id.strip())
+    return tuple(dict.fromkeys(template_ids))
+
+
+def _supported_candidate_count(generated_factors: Sequence[Mapping[str, Any]]) -> int:
+    return sum(
+        1
+        for factor in generated_factors
+        if factor.get("direction") in SUPPORTED_FACTOR_DIRECTIONS
+    )
+
+
+def _feature_manifest_path(output: Mapping[str, Any]) -> Path:
+    storage_stats = _mapping(output.get("storage_stats"))
+    manifest_path = storage_stats.get("manifest_path")
+    if not isinstance(manifest_path, str) or not manifest_path.strip():
+        msg = "FeatureAgent did not return storage_stats.manifest_path."
+        raise ValueError(msg)
+    return Path(manifest_path).expanduser().resolve()
+
+
 def _build_experiment_lineage(
     *,
     project_root: Path,
@@ -691,6 +880,16 @@ def _factor_direction_for(
     return spec.factor_direction
 
 
+def _optional_input_path(payload: Mapping[str, Any], key: str) -> Path | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        msg = f"payload.{key} must be a non-empty path string."
+        raise ValueError(msg)
+    return Path(value.strip()).expanduser().resolve()
+
+
 def _required_path(payload: Mapping[str, Any], key: str) -> Path:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -713,6 +912,16 @@ def _optional_str(payload: Mapping[str, Any], key: str, default: str) -> str:
         msg = f"payload.{key} must be a string."
         raise ValueError(msg)
     return value.strip()
+
+
+def _optional_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any] | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        msg = f"payload.{key} must be an object."
+        raise ValueError(msg)
+    return dict(value)
 
 
 def _optional_str_sequence(payload: Mapping[str, Any], key: str) -> tuple[str, ...]:
