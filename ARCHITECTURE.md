@@ -1705,6 +1705,9 @@ Implemented in `quant-agent/`:
     out-of-sample splits and requires out-of-sample benchmark gates to pass
 -   the walk-forward check compares each fold's train/test RankIC direction and
     requires the test split benchmark gates to pass
+-   `summary.metric_comparison` compares in-sample and out-of-sample IC,
+    RankIC, net Sharpe, maximum drawdown, average turnover, and net total
+    return
 -   optional `continue_on_error` behavior so one bad split can either stop the
     run or be recorded while other splits continue
 -   structured logs for request validation, split backtests, and storage
@@ -1767,6 +1770,7 @@ factor_direction
 records
 summary
 summary.walk_forward_check
+summary.metric_comparison
 storage_stats
 ```
 

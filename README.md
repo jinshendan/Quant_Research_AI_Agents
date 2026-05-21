@@ -48,7 +48,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | ExperimentAgent | 已实现 MVP | 批量回测 factor manifest 或自动生成候选公式，并调用 CriticAgent 审查 |
 | ExperimentStore | 已实现 MVP | 保存单次实验 JSON、CSV 汇总、JSONL 历史索引、lineage 元数据和历史查询 |
 | BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
-| OutOfSampleAgent | 已实现 MVP | 按 train / validation / test 或 walk-forward 信号日期切分复用 BacktestAgent，并保存样本外验证 JSON 和 CSV 汇总 |
+| OutOfSampleAgent | 已实现 MVP | 按 train / validation / test 或 walk-forward 信号日期切分复用 BacktestAgent，并保存样本外验证 JSON、CSV 汇总和样本内/样本外指标对比 |
 | 交易成本模型 | 已实现 | 佣金、印花税、过户费、滑点、换手率、gross/net 指标 |
 | Benchmark tests | 已实现 | 对回测结果做确定性质量门槛检查，默认检查样本数、RankIC、净夏普、净收益、回撤和分组股票数 |
 | CriticAgent | 已实现 | 将 benchmark 失败项翻译成 track/revise/reject 审查结论 |
@@ -497,6 +497,7 @@ response = OutOfSampleAgent().run(
 )
 
 print(response.output["summary"]["basic_oos_check"])
+print(response.output["summary"]["metric_comparison"])
 print(response.output["storage_stats"]["result_path"])
 print(response.output["storage_stats"]["summary_path"])
 ```
@@ -526,11 +527,14 @@ response = OutOfSampleAgent().run(
 )
 
 print(response.output["summary"]["walk_forward_check"])
+print(response.output["summary"]["metric_comparison"])
 ```
 
 OutOfSampleAgent 按“信号日期”切分样本。也就是说，`start_date` 和 `end_date`
 限定的是因子信号所在日期，`forward_return_days` 对应的未来收益仍由 BacktestAgent
-按统一逻辑计算。它会为每个 split 保存一个 BacktestAgent 结果 JSON，并额外保存：
+按统一逻辑计算。它会为每个 split 保存一个 BacktestAgent 结果 JSON，并在
+`summary.metric_comparison` 中比较样本内和样本外的 IC、RankIC、net Sharpe、
+最大回撤、平均换手和成本后收益。它额外保存：
 
 - `validations/{validation_id}/out_of_sample_result.json`
 - `validations/{validation_id}/out_of_sample_summary.csv`
@@ -600,7 +604,7 @@ print(report_response.output["report_path"])
 | --- | --- |
 | P0 | 已完成因子选择、组合因子和因子定义注册表 |
 | P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引、lineage 记录、历史查询、候选公式执行和扩展候选空间 |
-| P2 | 已加入 train / validation / test 和 walk-forward 样本外验证；下一步加入因子衰减和稳健性检查 |
+| P2 | 已加入 train / validation / test、walk-forward 和样本内/样本外指标对比；下一步在报告中标记样本外是否通过，并加入因子衰减和稳健性检查 |
 | P3 | 做因子相关性分析、多因子 alpha 选择和候选池管理 |
 | P4 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
 | P5 | 构建 PortfolioAgent、paper trading log 和组合风控 |
@@ -655,7 +659,7 @@ management, live risk controls, and complete entry/exit rules remain future work
 | ExperimentAgent | MVP done | Batch-backtests factors from a manifest or generated candidate formulas and critiques them |
 | ExperimentStore | MVP done | Stores experiment JSON, CSV summary, JSONL history index, lineage metadata, and query results |
 | BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
-| OutOfSampleAgent | MVP done | Reuses BacktestAgent over train / validation / test or walk-forward signal-date windows and stores validation JSON plus CSV summaries |
+| OutOfSampleAgent | MVP done | Reuses BacktestAgent over train / validation / test or walk-forward signal-date windows, then stores validation JSON, CSV summaries, and in-sample/out-of-sample metric comparisons |
 | Transaction cost model | Done | Commission, stamp duty, transfer fee, slippage, turnover, gross/net metrics |
 | Benchmark tests | Done | Deterministic gates over sample size, RankIC, net Sharpe, net return, drawdown, and average leg count |
 | CriticAgent | Done | Converts failed benchmark gates into track/revise/reject critiques |
@@ -1037,6 +1041,7 @@ response = OutOfSampleAgent().run(
 )
 
 print(response.output["summary"]["basic_oos_check"])
+print(response.output["summary"]["metric_comparison"])
 print(response.output["storage_stats"]["result_path"])
 print(response.output["storage_stats"]["summary_path"])
 ```
@@ -1066,11 +1071,14 @@ response = OutOfSampleAgent().run(
 )
 
 print(response.output["summary"]["walk_forward_check"])
+print(response.output["summary"]["metric_comparison"])
 ```
 
 OutOfSampleAgent splits by signal date. The future-return horizon is still
-computed by BacktestAgent from the shared aligned price data. It writes one
-backtest JSON per split plus:
+computed by BacktestAgent from the shared aligned price data. It compares
+in-sample and out-of-sample IC, RankIC, net Sharpe, maximum drawdown, average
+turnover, and net return in `summary.metric_comparison`. It writes one backtest
+JSON per split plus:
 
 - `validations/{validation_id}/out_of_sample_result.json`
 - `validations/{validation_id}/out_of_sample_summary.csv`

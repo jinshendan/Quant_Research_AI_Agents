@@ -39,6 +39,14 @@ SplitRole = Literal["train", "validation", "test", "custom"]
 ValidationMethod = Literal["explicit_splits", "walk_forward"]
 SUPPORTED_SPLIT_ROLES = {"train", "validation", "test", "custom"}
 _SAFE_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
+COMPARISON_METRICS: tuple[tuple[str, str, bool], ...] = (
+    ("mean_ic", "IC", True),
+    ("mean_rank_ic", "RankIC", True),
+    ("net_sharpe", "Net Sharpe", True),
+    ("max_drawdown_abs", "Max Drawdown Abs", False),
+    ("average_turnover", "Average Turnover", False),
+    ("net_total_return", "Net Total Return", True),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,7 +418,9 @@ class OutOfSampleAgent:
                 "records": records,
                 "summary": summary,
                 "storage_stats": storage_result.to_dict(),
-                "next_action": "Add walk-forward validation and factor decay tests.",
+                "next_action": (
+                    "Add out-of-sample pass/fail report markers and factor decay tests."
+                ),
             },
             metadata=self._metadata(
                 request,
@@ -611,6 +621,7 @@ def _validation_summary(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "benchmark_status_counts": dict(benchmark_counts),
         "basic_oos_check": _basic_oos_check(successful, failed),
         "walk_forward_check": _walk_forward_check(records),
+        "metric_comparison": _metric_comparison(successful, failed),
     }
 
 
@@ -689,6 +700,14 @@ def _train_record(records: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | N
     return records[0] if records else None
 
 
+def _training_records(records: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    role_based = [record for record in records if record.get("split_role") == "train"]
+    if role_based:
+        return role_based
+    train_record = _train_record(records)
+    return [train_record] if train_record is not None else []
+
+
 def _out_of_sample_records(
     records: Sequence[Mapping[str, Any]],
     train_record: Mapping[str, Any],
@@ -701,6 +720,165 @@ def _out_of_sample_records(
     if role_based:
         return role_based
     return [record for record in records if record is not train_record]
+
+
+def _comparison_out_of_sample_records(
+    records: Sequence[Mapping[str, Any]],
+    training_records: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    role_based = [
+        record
+        for record in records
+        if record.get("split_role") != "train"
+        and not _contains_same_record(training_records, record)
+    ]
+    if role_based:
+        return role_based
+    return [
+        record
+        for record in records
+        if not _contains_same_record(training_records, record)
+    ]
+
+
+def _contains_same_record(
+    records: Sequence[Mapping[str, Any]],
+    candidate: Mapping[str, Any],
+) -> bool:
+    return any(record is candidate for record in records)
+
+
+def _metric_comparison(
+    successful: Sequence[Mapping[str, Any]],
+    failed: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    training_records = _training_records(successful)
+    out_of_sample_records = _comparison_out_of_sample_records(
+        successful,
+        training_records,
+    )
+    if not training_records or not out_of_sample_records:
+        return {
+            "status": "not_enough_data",
+            "reason": (
+                "missing_train_split"
+                if not training_records
+                else "missing_out_of_sample_splits"
+            ),
+            "in_sample_split_names": _split_names(training_records),
+            "out_of_sample_split_names": _split_names(out_of_sample_records),
+            "failed_split_names": _split_names(failed),
+            "metrics": {},
+        }
+
+    metrics = {
+        metric_key: _compare_metric(
+            metric_key,
+            label=label,
+            higher_is_better=higher_is_better,
+            in_sample_records=training_records,
+            out_of_sample_records=out_of_sample_records,
+        )
+        for metric_key, label, higher_is_better in COMPARISON_METRICS
+    }
+    available_count = sum(1 for metric in metrics.values() if metric["status"] == "available")
+    if available_count == 0:
+        status = "not_enough_data"
+    elif failed:
+        status = "partial"
+    else:
+        status = "available"
+    return {
+        "status": status,
+        "reason": (
+            "metric_comparison_available"
+            if status == "available"
+            else "one_or_more_splits_failed"
+            if status == "partial"
+            else "missing_comparable_metrics"
+        ),
+        "in_sample_split_names": _split_names(training_records),
+        "out_of_sample_split_names": _split_names(out_of_sample_records),
+        "failed_split_names": _split_names(failed),
+        "metric_count": len(metrics),
+        "available_metric_count": available_count,
+        "metrics": metrics,
+    }
+
+
+def _compare_metric(
+    metric_key: str,
+    *,
+    label: str,
+    higher_is_better: bool,
+    in_sample_records: Sequence[Mapping[str, Any]],
+    out_of_sample_records: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    in_sample_values = _metric_values(in_sample_records, metric_key)
+    out_of_sample_values = _metric_values(out_of_sample_records, metric_key)
+    if not in_sample_values or not out_of_sample_values:
+        return {
+            "status": "missing",
+            "label": label,
+            "higher_is_better": higher_is_better,
+            "in_sample_mean": None,
+            "out_of_sample_mean": None,
+            "delta": None,
+            "retention_ratio": None,
+            "out_of_sample_better_or_equal": None,
+            "in_sample_values": in_sample_values,
+            "out_of_sample_values": out_of_sample_values,
+        }
+
+    in_sample_mean = _mean(in_sample_values)
+    out_of_sample_mean = _mean(out_of_sample_values)
+    delta = out_of_sample_mean - in_sample_mean
+    retention_ratio = (
+        out_of_sample_mean / in_sample_mean
+        if abs(in_sample_mean) > 1e-12
+        else None
+    )
+    better_or_equal = (
+        out_of_sample_mean >= in_sample_mean
+        if higher_is_better
+        else out_of_sample_mean <= in_sample_mean
+    )
+    return {
+        "status": "available",
+        "label": label,
+        "higher_is_better": higher_is_better,
+        "in_sample_mean": in_sample_mean,
+        "out_of_sample_mean": out_of_sample_mean,
+        "delta": delta,
+        "retention_ratio": retention_ratio,
+        "out_of_sample_better_or_equal": better_or_equal,
+        "in_sample_values": in_sample_values,
+        "out_of_sample_values": out_of_sample_values,
+    }
+
+
+def _metric_values(
+    records: Sequence[Mapping[str, Any]],
+    metric_key: str,
+) -> list[float]:
+    values = []
+    for record in records:
+        value = _metric(record, metric_key)
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _mean(values: Sequence[float]) -> float:
+    return float(np.mean(values))
+
+
+def _split_names(records: Sequence[Mapping[str, Any]]) -> list[str]:
+    return [
+        str(record["split_name"])
+        for record in records
+        if isinstance(record.get("split_name"), str)
+    ]
 
 
 def _walk_forward_check(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:

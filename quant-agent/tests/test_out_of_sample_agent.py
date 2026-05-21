@@ -300,6 +300,16 @@ def test_out_of_sample_agent_runs_split_backtests_and_saves_artifacts(
     assert response.output["summary"]["basic_oos_check"][
         "rank_ic_direction_consistent"
     ] is True
+    metric_comparison = response.output["summary"]["metric_comparison"]
+    assert metric_comparison["status"] == "available"
+    assert metric_comparison["in_sample_split_names"] == ["train"]
+    assert metric_comparison["out_of_sample_split_names"] == ["validation", "test"]
+    assert metric_comparison["available_metric_count"] == 6
+    assert metric_comparison["metrics"]["mean_ic"]["out_of_sample_mean"] > 0.99
+    assert metric_comparison["metrics"]["mean_rank_ic"][
+        "out_of_sample_mean"
+    ] == pytest.approx(1.0)
+    assert metric_comparison["metrics"]["net_total_return"]["status"] == "available"
     assert response.metadata["agent"] == "OutOfSampleAgent"
     assert response.metadata["validation_id"] == "alpha-oos"
 
@@ -378,6 +388,25 @@ def test_out_of_sample_agent_runs_walk_forward_and_saves_artifacts(
     assert walk_check["failed_fold_count"] == 0
     assert walk_check["rank_ic_direction_consistent_count"] == 2
     assert walk_check["test_benchmark_passed_count"] == 2
+    metric_comparison = response.output["summary"]["metric_comparison"]
+    assert metric_comparison["status"] == "available"
+    assert metric_comparison["in_sample_split_names"] == [
+        "walk_001_train",
+        "walk_002_train",
+    ]
+    assert metric_comparison["out_of_sample_split_names"] == [
+        "walk_001_test",
+        "walk_002_test",
+    ]
+    assert metric_comparison["metrics"]["mean_rank_ic"][
+        "in_sample_mean"
+    ] == pytest.approx(1.0)
+    assert metric_comparison["metrics"]["mean_rank_ic"][
+        "out_of_sample_mean"
+    ] == pytest.approx(1.0)
+    assert metric_comparison["metrics"]["max_drawdown_abs"][
+        "higher_is_better"
+    ] is False
 
     records = response.output["records"]
     assert [record["split_name"] for record in records] == [
