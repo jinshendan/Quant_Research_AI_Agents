@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import StringIO
 from pathlib import Path
 
@@ -102,12 +103,52 @@ def _memory_record(
     }
 
 
+def _write_out_of_sample_result(tmp_path: Path, *, status: str = "passed") -> Path:
+    path = tmp_path / "validations" / "alpha-oos" / "out_of_sample_result.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    basic_status = "passed" if status == "passed" else "failed"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "validation_id": "alpha-oos",
+                "request": {"validation_method": "explicit_splits"},
+                "summary": {
+                    "status": "success",
+                    "split_count": 3,
+                    "failed_split_names": [],
+                    "basic_oos_check": {
+                        "status": basic_status,
+                        "out_of_sample_split_names": ["validation", "test"],
+                    },
+                    "walk_forward_check": {"status": "not_applicable"},
+                    "metric_comparison": {
+                        "status": "available",
+                        "in_sample_split_names": ["train"],
+                        "out_of_sample_split_names": ["validation", "test"],
+                        "metrics": {
+                            "mean_rank_ic": {"out_of_sample_mean": 0.041},
+                            "net_sharpe": {"out_of_sample_mean": 1.08},
+                            "net_total_return": {"out_of_sample_mean": 0.16},
+                        },
+                    },
+                },
+            },
+            ensure_ascii=True,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_report_spec_accepts_memory_path_and_wiki_alias(tmp_path: Path) -> None:
+    oos_path = tmp_path / "validations" / "alpha-oos" / "out_of_sample_result.json"
     spec = ReportSpec.from_payload(
         {
             "memory_path": str(tmp_path / "memory" / "factor_memory.jsonl"),
             "factor_name": "alpha_momentum",
             "wiki_path": str(tmp_path / "memory" / "factor_wiki.md"),
+            "out_of_sample_result_path": str(oos_path),
             "report_path": str(tmp_path / "reports" / "momentum.md"),
             "report_title": "Momentum Factor Report",
         }
@@ -117,6 +158,7 @@ def test_report_spec_accepts_memory_path_and_wiki_alias(tmp_path: Path) -> None:
     assert spec.memory_path == tmp_path / "memory" / "factor_memory.jsonl"
     assert spec.factor_name == "alpha_momentum"
     assert spec.factor_wiki_path == tmp_path / "memory" / "factor_wiki.md"
+    assert spec.out_of_sample_result_path == oos_path
     assert spec.report_path == tmp_path / "reports" / "momentum.md"
     assert spec.report_title == "Momentum Factor Report"
     assert spec.output_language is None
@@ -156,7 +198,7 @@ def test_report_agent_generates_markdown_report_from_memory_path(
     assert response.status == "success"
     assert response.output["state"] == "markdown_report_generated"
     assert response.output["report_title"] == "Research Report: alpha_momentum"
-    assert response.output["section_count"] == 5
+    assert response.output["section_count"] == 6
     assert response.output["report_draft_format"] == "structured_json"
     assert response.output["report_format"] == "markdown"
     assert response.output["next_action"] == "Build Streamlit dashboard in Day 27."
@@ -174,10 +216,13 @@ def test_report_agent_generates_markdown_report_from_memory_path(
         "hypothesis",
         "factor_formula",
         "backtest_results",
+        "out_of_sample_validation",
         "risk_analysis",
         "conclusion",
     ]
     assert draft["sections"][-1]["content"]["verdict"] == "candidate_for_follow_up"
+    assert draft["sections"][3]["content"]["out_of_sample_status"] == "not_provided"
+    assert draft["sections"][-1]["content"]["out_of_sample_status"] == "not_provided"
     assert draft["next_action"] == "Build Streamlit dashboard in Day 27."
     report_path = tmp_path / "research_logs" / "alpha_momentum_memory-1.md"
     markdown_report = response.output["report_markdown"]
@@ -191,6 +236,8 @@ def test_report_agent_generates_markdown_report_from_memory_path(
     assert report_path.read_text(encoding="utf-8") == markdown_report
     assert markdown_report.startswith("# Research Report: alpha_momentum\n")
     assert "## Backtest Results" in markdown_report
+    assert "## Out-of-sample Validation" in markdown_report
+    assert "- Out-of-sample status: not_provided" in markdown_report
     assert "- Net Sharpe: 1.2" in markdown_report
     assert "- Total transaction cost: 0.014" in markdown_report
     assert "- Benchmark status: passed" in markdown_report
@@ -216,6 +263,44 @@ def test_report_agent_writes_custom_markdown_report_path(tmp_path: Path) -> None
     assert report_path.is_file()
 
 
+def test_report_agent_marks_out_of_sample_validation_result(tmp_path: Path) -> None:
+    report_path = tmp_path / "reports" / "oos.md"
+    oos_path = _write_out_of_sample_result(tmp_path)
+    agent = ReportAgent(config=_config(tmp_path))
+
+    response = agent.run(
+        AgentRequest.create(
+            {
+                "memory_record": _memory_record("memory-oos"),
+                "out_of_sample_result_path": str(oos_path),
+                "report_path": str(report_path),
+            }
+        )
+    )
+
+    draft = response.output["report_draft"]
+    oos_section = draft["sections"][3]
+    conclusion = draft["sections"][-1]
+    markdown_report = response.output["report_markdown"]
+
+    assert response.status == "success"
+    assert draft["context"]["out_of_sample_result_path"] == str(oos_path.resolve())
+    assert oos_section["id"] == "out_of_sample_validation"
+    assert oos_section["content"]["out_of_sample_status"] == "passed"
+    assert oos_section["content"]["out_of_sample_passed"] is True
+    assert oos_section["content"]["validation_id"] == "alpha-oos"
+    assert oos_section["content"]["validation_method"] == "explicit_splits"
+    assert oos_section["content"]["out_of_sample_split_names"] == [
+        "validation",
+        "test",
+    ]
+    assert oos_section["content"]["out_of_sample_mean_rank_ic"] == 0.041
+    assert conclusion["content"]["out_of_sample_status"] == "passed"
+    assert conclusion["content"]["out_of_sample_passed"] is True
+    assert "- Out-of-sample status: passed" in markdown_report
+    assert "- Out-of-sample passed: True" in markdown_report
+
+
 def test_report_agent_generates_bilingual_markdown_report(tmp_path: Path) -> None:
     report_path = tmp_path / "reports" / "bilingual.md"
     agent = ReportAgent(config=AppConfig.from_env(project_root=tmp_path, environ={}))
@@ -237,6 +322,7 @@ def test_report_agent_generates_bilingual_markdown_report(tmp_path: Path) -> Non
     assert response.output["report_title"] == "研究报告：alpha_momentum / Research Report: alpha_momentum"
     assert "# 研究报告：alpha_momentum / Research Report: alpha_momentum" in markdown_report
     assert "## 研究假设 / Hypothesis" in markdown_report
+    assert "## 样本外验证 / Out-of-sample Validation" in markdown_report
     assert "- 扣成本后夏普 / Net Sharpe: 1.2" in markdown_report
     assert "- 累计交易成本 / Total transaction cost: 0.014" in markdown_report
     assert "- 基准状态 / Benchmark status: 通过 / passed" in markdown_report
@@ -284,10 +370,11 @@ def test_build_report_draft_marks_failed_benchmark_as_needs_review() -> None:
     )
 
     conclusion = draft.document["sections"][-1]
-    risk = draft.document["sections"][3]
+    risk = draft.document["sections"][4]
 
     assert draft.title == "Research Report: alpha_momentum"
     assert conclusion["content"]["verdict"] == "needs_review"
+    assert conclusion["content"]["out_of_sample_status"] == "not_provided"
     assert conclusion["content"]["failure_reason"] == "Failed benchmark tests: sharpe"
     assert risk["content"]["failed_tests"] == ["sharpe"]
 
@@ -301,6 +388,7 @@ def test_render_report_markdown_outputs_expected_sections() -> None:
     assert "## Metadata" in markdown
     assert "- Memory ID: `memory-1`" in markdown
     assert "## Hypothesis" in markdown
+    assert "## Out-of-sample Validation" in markdown
     assert "## Conclusion" in markdown
     assert "- Verdict: candidate_for_follow_up" in markdown
 

@@ -1164,10 +1164,14 @@ Implemented in `quant-agent/`:
 -   memory record selection by `payload.memory_id` or `payload.factor_name`
     when reading JSONL memory
 -   optional `payload.factor_wiki_path` context loading
+-   optional `payload.out_of_sample_result_path` context loading from
+    `OutOfSampleAgent`
 -   `build_report_draft(...)` for producing a structured JSON research report
     draft
--   five-section report draft contract: Hypothesis, Factor Formula, Backtest
-    Results, Risk Analysis, and Conclusion
+-   six-section report draft contract: Hypothesis, Factor Formula, Backtest
+    Results, Out-of-sample Validation, Risk Analysis, and Conclusion
+-   explicit out-of-sample status markers in both the validation section and
+    conclusion; omitted validation artifacts render as `not_provided`
 -   structured logs for validation, context loading, and draft construction
 -   tests for inline and JSONL source validation, selector behavior, failed
     benchmark conclusions, wiki context, and ReportAgent response integration
@@ -1218,6 +1222,7 @@ Current ReportAgent payload:
   "memory_path": "memory/factor_memory.jsonl",
   "factor_name": "alpha_001",
   "factor_wiki_path": "memory/factor_wiki.md",
+  "out_of_sample_result_path": "validations/alpha_001/out_of_sample_result.json",
   "report_path": "research_logs/alpha_001.md"
 }
 ```
@@ -1712,7 +1717,7 @@ Implemented in `quant-agent/`:
     run or be recorded while other splits continue
 -   structured logs for request validation, split backtests, and storage
 -   tests for spec validation, invalid date ranges, duplicate split names,
-    split backtest orchestration, and artifact persistence
+    split backtest orchestration, artifact persistence, and report handoff
 
 Current OutOfSampleAgent payload:
 

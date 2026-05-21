@@ -55,7 +55,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | MemoryAgent | 已实现 | 保存因子研究记录到 JSONL |
 | FAISS 语义检索 | 已实现 | 对因子记忆做本地向量索引和搜索 |
 | Factor wiki | 已实现 | 自动生成因子知识库 Markdown |
-| ReportAgent | 已实现 | 生成结构化研究报告和 Markdown 报告 |
+| ReportAgent | 已实现 | 生成结构化研究报告和 Markdown 报告，可标记样本外验证是否通过 |
 | 中英双语输出 | 已实现 | 报告、Factor Wiki、daily 摘要、AkShare smoke、dashboard 支持 `en` / `zh` / `bilingual` |
 | DailyRankingAgent | 已实现 | 生成每日 Top N 候选股票排名 CSV 和 Markdown |
 | A 股交易约束 | 已实现 | T+1 提示、涨跌停标记、ST/停牌/新股/退市风险过滤或标记 |
@@ -81,7 +81,7 @@ A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | 统一管理 A 股交易成本假设和换手成本估算 |
 | CriticAgent | `quant-agent/agents/critic_agent.py` | 审查回测质量并解释失败原因 |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | 保存因子研究记录和 FAISS 索引 |
-| ReportAgent | `quant-agent/agents/report_agent.py` | 生成 Markdown 研究报告 |
+| ReportAgent | `quant-agent/agents/report_agent.py` | 生成 Markdown 研究报告，并显示样本外验证状态 |
 | A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | 统一生成 A 股交易约束标签 |
 | DailyRankingAgent | `quant-agent/agents/daily_ranking.py` | 生成每日候选股票排名 |
 | I18N | `quant-agent/core/i18n.py` | 统一管理中英双语输出标签 |
@@ -565,6 +565,7 @@ report_response = ReportAgent().run(
         {
             "memory_path": memory_response.output["memory_path"],
             "factor_name": "custom_return_5d",
+            "out_of_sample_result_path": "validations/return_5d_oos_v1/out_of_sample_result.json",
             "output_language": "bilingual",
         }
     )
@@ -604,7 +605,7 @@ print(report_response.output["report_path"])
 | --- | --- |
 | P0 | 已完成因子选择、组合因子和因子定义注册表 |
 | P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引、lineage 记录、历史查询、候选公式执行和扩展候选空间 |
-| P2 | 已加入 train / validation / test、walk-forward 和样本内/样本外指标对比；下一步在报告中标记样本外是否通过，并加入因子衰减和稳健性检查 |
+| P2 | 已加入 train / validation / test、walk-forward、样本内/样本外指标对比和报告样本外标记；下一步加入因子衰减和稳健性检查 |
 | P3 | 做因子相关性分析、多因子 alpha 选择和候选池管理 |
 | P4 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
 | P5 | 构建 PortfolioAgent、paper trading log 和组合风控 |
@@ -666,7 +667,7 @@ management, live risk controls, and complete entry/exit rules remain future work
 | MemoryAgent | Done | JSONL factor research memory |
 | FAISS search | Done | Local semantic search over factor memory |
 | Factor wiki | Done | Markdown factor knowledge base |
-| ReportAgent | Done | Structured draft and Markdown report generation |
+| ReportAgent | Done | Structured draft and Markdown report generation with explicit out-of-sample validation markers |
 | Bilingual output | Done | Reports, Factor Wiki, daily summaries, AkShare smoke, and dashboard support `en` / `zh` / `bilingual` |
 | DailyRankingAgent | Done | Daily Top N candidate stock ranking as CSV and Markdown |
 | A-share trading constraints | Done | T+1 note, price-limit flags, ST/suspension/new-stock/delisting-risk filters |
@@ -692,7 +693,7 @@ management, live risk controls, and complete entry/exit rules remain future work
 | Transaction Costs | `quant-agent/agents/transaction_costs.py` | Centralize A-share cost assumptions and turnover cost estimates |
 | CriticAgent | `quant-agent/agents/critic_agent.py` | Review backtest quality and explain failed gates |
 | MemoryAgent | `quant-agent/agents/memory_agent.py` | Store factor research records and FAISS indexes |
-| ReportAgent | `quant-agent/agents/report_agent.py` | Generate Markdown research reports |
+| ReportAgent | `quant-agent/agents/report_agent.py` | Generate Markdown research reports with out-of-sample validation status |
 | A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | Generate reusable A-share trading-constraint flags |
 | DailyRankingAgent | `quant-agent/agents/daily_ranking.py` | Generate daily candidate stock rankings |
 | I18N | `quant-agent/core/i18n.py` | Shared bilingual output labels |
@@ -1110,7 +1111,7 @@ JSON per split plus:
 
 The roadmap lives in `TODO.md`. The next priorities are:
 
-- extend out-of-sample validation with decay and robustness checks
+- extend out-of-sample validation with factor decay and robustness checks
 - add factor correlation analysis and multi-factor alpha selection
 - build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions
 - build PortfolioAgent, paper trading logs, dashboard filters, and watchlist workflows

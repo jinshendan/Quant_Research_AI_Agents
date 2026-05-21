@@ -28,6 +28,7 @@ REPORT_SECTION_ORDER = (
     ("hypothesis", "Hypothesis"),
     ("factor_formula", "Factor Formula"),
     ("backtest_results", "Backtest Results"),
+    ("out_of_sample_validation", "Out-of-sample Validation"),
     ("risk_analysis", "Risk Analysis"),
     ("conclusion", "Conclusion"),
 )
@@ -35,6 +36,10 @@ REPORT_SECTION_TITLES = {
     "hypothesis": LocalizedText(en="Hypothesis", zh="研究假设"),
     "factor_formula": LocalizedText(en="Factor Formula", zh="因子公式"),
     "backtest_results": LocalizedText(en="Backtest Results", zh="回测结果"),
+    "out_of_sample_validation": LocalizedText(
+        en="Out-of-sample Validation",
+        zh="样本外验证",
+    ),
     "risk_analysis": LocalizedText(en="Risk Analysis", zh="风险分析"),
     "conclusion": LocalizedText(en="Conclusion", zh="结论"),
 }
@@ -94,6 +99,46 @@ REPORT_LABELS = {
     "total_turnover": LocalizedText(en="Total turnover", zh="累计换手率"),
     "max_transaction_cost": LocalizedText(en="Max transaction cost", zh="最大单期交易成本"),
     "benchmark_status": LocalizedText(en="Benchmark status", zh="基准状态"),
+    "out_of_sample_status": LocalizedText(
+        en="Out-of-sample status",
+        zh="样本外状态",
+    ),
+    "out_of_sample_passed": LocalizedText(
+        en="Out-of-sample passed",
+        zh="样本外是否通过",
+    ),
+    "validation_id": LocalizedText(en="Validation ID", zh="验证 ID"),
+    "validation_method": LocalizedText(en="Validation method", zh="验证方法"),
+    "split_count": LocalizedText(en="Split count", zh="切分数量"),
+    "basic_oos_status": LocalizedText(en="Basic OOS status", zh="基础样本外状态"),
+    "walk_forward_status": LocalizedText(
+        en="Walk-forward status",
+        zh="滚动验证状态",
+    ),
+    "metric_comparison_status": LocalizedText(
+        en="Metric comparison status",
+        zh="指标对比状态",
+    ),
+    "in_sample_split_names": LocalizedText(
+        en="In-sample splits",
+        zh="样本内切分",
+    ),
+    "out_of_sample_split_names": LocalizedText(
+        en="Out-of-sample splits",
+        zh="样本外切分",
+    ),
+    "out_of_sample_mean_rank_ic": LocalizedText(
+        en="Out-of-sample mean RankIC",
+        zh="样本外平均 RankIC",
+    ),
+    "out_of_sample_net_sharpe": LocalizedText(
+        en="Out-of-sample net Sharpe",
+        zh="样本外扣成本后夏普",
+    ),
+    "out_of_sample_net_total_return": LocalizedText(
+        en="Out-of-sample net total return",
+        zh="样本外扣成本后总收益",
+    ),
     "passed_count": LocalizedText(en="Passed count", zh="通过数量"),
     "failed_count": LocalizedText(en="Failed count", zh="失败数量"),
     "failed_tests": LocalizedText(en="Failed tests", zh="失败测试"),
@@ -112,6 +157,11 @@ REPORT_VALUE_LABELS = {
     "needs_review": LocalizedText(en="needs_review", zh="需要复核"),
     "passed": LocalizedText(en="passed", zh="通过"),
     "failed": LocalizedText(en="failed", zh="未通过"),
+    "not_provided": LocalizedText(en="not_provided", zh="未提供"),
+    "not_applicable": LocalizedText(en="not_applicable", zh="不适用"),
+    "not_enough_data": LocalizedText(en="not_enough_data", zh="数据不足"),
+    "available": LocalizedText(en="available", zh="可用"),
+    "partial": LocalizedText(en="partial", zh="部分完成"),
     "unknown": LocalizedText(en="unknown", zh="未知"),
 }
 _SAFE_REPORT_STEM_PATTERN = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -126,6 +176,7 @@ class ReportSpec:
     memory_id: str | None = None
     factor_name: str | None = None
     factor_wiki_path: Path | None = None
+    out_of_sample_result_path: Path | None = None
     report_path: Path | None = None
     report_title: str | None = None
     output_language: OutputLanguage | None = None
@@ -150,6 +201,14 @@ class ReportSpec:
                 payload,
                 ("factor_wiki_path", "wiki_path"),
             ),
+            out_of_sample_result_path=_optional_path_alias(
+                payload,
+                (
+                    "out_of_sample_result_path",
+                    "oos_result_path",
+                    "validation_result_path",
+                ),
+            ),
             report_path=_optional_path(payload, "report_path"),
             report_title=_optional_str(payload, "report_title"),
             output_language=_optional_output_language(payload),
@@ -163,6 +222,11 @@ class ReportSpec:
             "factor_name": self.factor_name,
             "factor_wiki_path": (
                 str(self.factor_wiki_path) if self.factor_wiki_path else None
+            ),
+            "out_of_sample_result_path": (
+                str(self.out_of_sample_result_path)
+                if self.out_of_sample_result_path
+                else None
             ),
             "report_path": str(self.report_path) if self.report_path else None,
             "report_title": self.report_title,
@@ -238,6 +302,9 @@ class ReportAgent:
         try:
             memory_record = self.load_memory_record(spec)
             factor_wiki_text = self.load_factor_wiki(spec.factor_wiki_path)
+            out_of_sample_result = self.load_out_of_sample_result(
+                spec.out_of_sample_result_path,
+            )
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             elapsed = perf_counter() - started_at
             self.logger.warning(
@@ -264,6 +331,8 @@ class ReportAgent:
                 report_title=spec.report_title,
                 factor_wiki_path=spec.factor_wiki_path,
                 factor_wiki_text=factor_wiki_text,
+                out_of_sample_result=out_of_sample_result,
+                out_of_sample_result_path=spec.out_of_sample_result_path,
                 output_language=output_language,
             )
         except (TypeError, ValueError) as exc:
@@ -361,6 +430,21 @@ class ReportAgent:
             raise OSError(msg)
         return factor_wiki_path.read_text(encoding="utf-8")
 
+    def load_out_of_sample_result(
+        self,
+        out_of_sample_result_path: Path | None,
+    ) -> dict[str, Any] | None:
+        if out_of_sample_result_path is None:
+            return None
+        if not out_of_sample_result_path.is_file():
+            msg = f"Out-of-sample result file not found: {out_of_sample_result_path}."
+            raise OSError(msg)
+        value = json.loads(out_of_sample_result_path.read_text(encoding="utf-8"))
+        if not isinstance(value, Mapping):
+            msg = "out_of_sample_result_path must contain a JSON object."
+            raise ValueError(msg)
+        return dict(value)
+
     def resolve_report_path(self, spec: ReportSpec, report_draft: ReportDraft) -> Path:
         if spec.report_path is not None:
             return spec.report_path
@@ -432,6 +516,8 @@ def build_report_draft(
     report_title: str | None = None,
     factor_wiki_path: Path | None = None,
     factor_wiki_text: str | None = None,
+    out_of_sample_result: Mapping[str, Any] | None = None,
+    out_of_sample_result_path: Path | None = None,
     output_language: str | None = None,
 ) -> ReportDraft:
     """Build a structured report draft without rendering Markdown."""
@@ -475,11 +561,19 @@ def build_report_draft(
             "factor_wiki_line_count": (
                 len(factor_wiki_text.splitlines()) if factor_wiki_text else 0
             ),
+            "out_of_sample_result_path": (
+                str(out_of_sample_result_path) if out_of_sample_result_path else None
+            ),
         },
         "sections": [
             _hypothesis_section(factor, output_language=language),
             _factor_formula_section(factor, diagnostics, output_language=language),
             _backtest_results_section(performance, benchmark, output_language=language),
+            _out_of_sample_validation_section(
+                out_of_sample_result,
+                out_of_sample_result_path=out_of_sample_result_path,
+                output_language=language,
+            ),
             _risk_analysis_section(
                 performance,
                 benchmark,
@@ -487,7 +581,13 @@ def build_report_draft(
                 artifacts,
                 output_language=language,
             ),
-            _conclusion_section(performance, benchmark, diagnostics, output_language=language),
+            _conclusion_section(
+                performance,
+                benchmark,
+                diagnostics,
+                out_of_sample_result,
+                output_language=language,
+            ),
         ],
         "next_action": "Build Streamlit dashboard in Day 27.",
     }
@@ -628,6 +728,41 @@ def _backtest_results_section(
     )
 
 
+def _out_of_sample_validation_section(
+    out_of_sample_result: Mapping[str, Any] | None,
+    *,
+    out_of_sample_result_path: Path | None,
+    output_language: OutputLanguage,
+) -> dict[str, Any]:
+    summary = _out_of_sample_report_summary(
+        out_of_sample_result,
+        out_of_sample_result_path=out_of_sample_result_path,
+    )
+    return _section(
+        "out_of_sample_validation",
+        {
+            "out_of_sample_status": summary["out_of_sample_status"],
+            "out_of_sample_passed": summary["out_of_sample_passed"],
+            "validation_id": summary["validation_id"],
+            "validation_method": summary["validation_method"],
+            "split_count": summary["split_count"],
+            "basic_oos_status": summary["basic_oos_status"],
+            "walk_forward_status": summary["walk_forward_status"],
+            "metric_comparison_status": summary["metric_comparison_status"],
+            "in_sample_split_names": summary["in_sample_split_names"],
+            "out_of_sample_split_names": summary["out_of_sample_split_names"],
+            "out_of_sample_mean_rank_ic": summary["out_of_sample_mean_rank_ic"],
+            "out_of_sample_net_sharpe": summary["out_of_sample_net_sharpe"],
+            "out_of_sample_net_total_return": summary[
+                "out_of_sample_net_total_return"
+            ],
+            "failure_reason": summary["failure_reason"],
+            "result_json_path": summary["result_json_path"],
+        },
+        output_language=output_language,
+    )
+
+
 def _risk_analysis_section(
     performance: Mapping[str, Any],
     benchmark: Mapping[str, Any],
@@ -657,16 +792,25 @@ def _conclusion_section(
     performance: Mapping[str, Any],
     benchmark: Mapping[str, Any],
     diagnostics: Mapping[str, Any],
+    out_of_sample_result: Mapping[str, Any] | None,
     *,
     output_language: OutputLanguage,
 ) -> dict[str, Any]:
     benchmark_status = str(benchmark.get("status") or "unknown")
+    oos_summary = _out_of_sample_report_summary(
+        out_of_sample_result,
+        out_of_sample_result_path=None,
+    )
     verdict = "candidate_for_follow_up" if benchmark_status == "passed" else "needs_review"
+    if oos_summary["out_of_sample_status"] == "failed":
+        verdict = "needs_review"
     return _section(
         "conclusion",
         {
             "verdict": verdict,
             "benchmark_status": benchmark_status,
+            "out_of_sample_status": oos_summary["out_of_sample_status"],
+            "out_of_sample_passed": oos_summary["out_of_sample_passed"],
             "key_metric": {
                 "rank_ic": performance.get("rank_ic"),
                 "net_sharpe": performance.get("net_sharpe"),
@@ -676,6 +820,132 @@ def _conclusion_section(
         },
         output_language=output_language,
     )
+
+
+def _out_of_sample_report_summary(
+    out_of_sample_result: Mapping[str, Any] | None,
+    *,
+    out_of_sample_result_path: Path | None,
+) -> dict[str, Any]:
+    if out_of_sample_result is None:
+        return {
+            "out_of_sample_status": "not_provided",
+            "out_of_sample_passed": False,
+            "validation_id": None,
+            "validation_method": None,
+            "split_count": None,
+            "basic_oos_status": None,
+            "walk_forward_status": None,
+            "metric_comparison_status": None,
+            "in_sample_split_names": [],
+            "out_of_sample_split_names": [],
+            "out_of_sample_mean_rank_ic": None,
+            "out_of_sample_net_sharpe": None,
+            "out_of_sample_net_total_return": None,
+            "failure_reason": "out_of_sample_result_not_provided",
+            "result_json_path": None,
+        }
+
+    summary = _required_mapping(out_of_sample_result, "summary")
+    request = _mapping_or_empty(out_of_sample_result.get("request"))
+    basic_oos_check = _mapping_or_empty(summary.get("basic_oos_check"))
+    walk_forward_check = _mapping_or_empty(summary.get("walk_forward_check"))
+    metric_comparison = _mapping_or_empty(summary.get("metric_comparison"))
+    metrics = _mapping_or_empty(metric_comparison.get("metrics"))
+
+    validation_status = str(summary.get("status") or "unknown")
+    basic_oos_status = str(basic_oos_check.get("status") or "unknown")
+    walk_forward_status = str(
+        walk_forward_check.get("status")
+        or ("not_applicable" if not walk_forward_check else "unknown")
+    )
+    metric_comparison_status = str(metric_comparison.get("status") or "unknown")
+    passed = (
+        validation_status == "success"
+        and basic_oos_status == "passed"
+        and walk_forward_status in {"passed", "not_applicable"}
+    )
+    out_of_sample_status = "passed" if passed else "failed"
+    failed_split_names = list(_string_sequence(summary.get("failed_split_names")))
+    failure_reason = (
+        "out_of_sample_validation_passed"
+        if passed
+        else _out_of_sample_failure_reason(
+            validation_status=validation_status,
+            basic_oos_status=basic_oos_status,
+            walk_forward_status=walk_forward_status,
+            failed_split_names=failed_split_names,
+        )
+    )
+
+    return {
+        "out_of_sample_status": out_of_sample_status,
+        "out_of_sample_passed": passed,
+        "validation_id": out_of_sample_result.get("validation_id"),
+        "validation_method": request.get("validation_method"),
+        "split_count": summary.get("split_count"),
+        "basic_oos_status": basic_oos_status,
+        "walk_forward_status": walk_forward_status,
+        "metric_comparison_status": metric_comparison_status,
+        "in_sample_split_names": list(
+            _string_sequence(metric_comparison.get("in_sample_split_names"))
+        ),
+        "out_of_sample_split_names": list(
+            _string_sequence(metric_comparison.get("out_of_sample_split_names"))
+        )
+        or list(_string_sequence(basic_oos_check.get("out_of_sample_split_names"))),
+        "out_of_sample_mean_rank_ic": _comparison_metric_value(
+            metrics,
+            "mean_rank_ic",
+            "out_of_sample_mean",
+        ),
+        "out_of_sample_net_sharpe": _comparison_metric_value(
+            metrics,
+            "net_sharpe",
+            "out_of_sample_mean",
+        ),
+        "out_of_sample_net_total_return": _comparison_metric_value(
+            metrics,
+            "net_total_return",
+            "out_of_sample_mean",
+        ),
+        "failure_reason": failure_reason,
+        "result_json_path": str(out_of_sample_result_path)
+        if out_of_sample_result_path is not None
+        else None,
+    }
+
+
+def _out_of_sample_failure_reason(
+    *,
+    validation_status: str,
+    basic_oos_status: str,
+    walk_forward_status: str,
+    failed_split_names: Sequence[str],
+) -> str:
+    reasons = [
+        f"validation_status={validation_status}",
+        f"basic_oos_status={basic_oos_status}",
+        f"walk_forward_status={walk_forward_status}",
+    ]
+    if failed_split_names:
+        reasons.append("failed_splits=" + ",".join(failed_split_names))
+    return "; ".join(reasons)
+
+
+def _comparison_metric_value(
+    metrics: Mapping[str, Any],
+    metric_key: str,
+    value_key: str,
+) -> Any:
+    metric = metrics.get(metric_key)
+    if not isinstance(metric, Mapping):
+        return None
+    return metric.get(value_key)
+
+
+def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
 
 
 def _section(
