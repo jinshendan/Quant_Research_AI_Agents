@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Literal, cast
@@ -33,6 +35,7 @@ from core.logging import AgentLoggerAdapter, get_agent_logger
 from core.models import AgentRequest, AgentResponse
 
 EXPERIMENT_SCHEMA_VERSION = 1
+EXPERIMENT_LINEAGE_SCHEMA_VERSION = 1
 DEFAULT_EXPERIMENT_OUTPUT_DIR = "experiments"
 FactorDirection = Literal["positive", "negative"]
 DEFAULT_EXPERIMENT_FACTOR_DIRECTION: FactorDirection = "positive"
@@ -237,6 +240,13 @@ class ExperimentAgent:
 
         elapsed = perf_counter() - started_clock
         summary = _experiment_summary(records)
+        request_config = spec.to_dict()
+        lineage = _build_experiment_lineage(
+            project_root=self.config.project_root,
+            request_config=request_config,
+            factor_manifest_path=spec.factor_manifest_path,
+            manifest=manifest,
+        )
         document = {
             "schema_version": EXPERIMENT_SCHEMA_VERSION,
             "storage_schema_version": EXPERIMENT_STORAGE_SCHEMA_VERSION,
@@ -244,7 +254,8 @@ class ExperimentAgent:
             "created_at": started_at,
             "agent": self.name,
             "task_id": request.task_id,
-            "request": spec.to_dict(),
+            "request": request_config,
+            "lineage": lineage,
             "factor_manifest_path": str(spec.factor_manifest_path),
             "available_factor_columns": list(available_factor_columns),
             "selected_factor_columns": list(selected_factor_columns),
@@ -515,6 +526,93 @@ def _load_manifest(path: Path) -> dict[str, Any]:
         msg = "Factor manifest must contain an object."
         raise ValueError(msg)
     return dict(document)
+
+
+def _build_experiment_lineage(
+    *,
+    project_root: Path,
+    request_config: Mapping[str, Any],
+    factor_manifest_path: Path,
+    manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    storage = _mapping(manifest.get("storage"))
+    context = _mapping(manifest.get("context"))
+    factor_manifest_hash = _file_sha256(factor_manifest_path)
+    data_version_inputs = {
+        "factor_manifest_hash": factor_manifest_hash,
+        "factor_matrix": _file_identity(storage.get("matrix_path")),
+        "source_aligned_data": _file_identity(context.get("source_aligned_data_path")),
+        "factor_columns": _string_list(storage.get("factor_columns")),
+        "factor_count": storage.get("factor_count"),
+        "rows_written": storage.get("rows_written"),
+        "manifest_created_at": manifest.get("created_at"),
+        "manifest_schema_version": manifest.get("schema_version"),
+    }
+    return {
+        "schema_version": EXPERIMENT_LINEAGE_SCHEMA_VERSION,
+        "git_commit": _git_output(project_root, ("rev-parse", "HEAD")),
+        "git_is_dirty": _git_is_dirty(project_root),
+        "config_hash": _stable_json_hash(request_config),
+        "factor_manifest_hash": factor_manifest_hash,
+        "data_version": _stable_json_hash(data_version_inputs),
+        "data_version_inputs": data_version_inputs,
+    }
+
+
+def _git_is_dirty(project_root: Path) -> bool | None:
+    output = _git_output(project_root, ("status", "--short"))
+    if output is None:
+        return None
+    return bool(output.strip())
+
+
+def _git_output(project_root: Path, args: Sequence[str]) -> str | None:
+    try:
+        result = subprocess.run(
+            ("git", *args),
+            cwd=project_root,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=2.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    output = result.stdout.strip()
+    return output or None
+
+
+def _file_identity(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str) or not value.strip():
+        return {"path": None, "exists": False}
+    path = Path(value).expanduser()
+    identity: dict[str, Any] = {"path": str(path), "exists": path.is_file()}
+    if not path.is_file():
+        return identity
+    stat = path.stat()
+    identity["size_bytes"] = stat.st_size
+    identity["modified_ns"] = stat.st_mtime_ns
+    return identity
+
+
+def _file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _stable_json_hash(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()
 
 
 def _manifest_factor_columns(manifest: Mapping[str, Any]) -> tuple[str, ...]:

@@ -151,6 +151,10 @@ def _build_index_records(
     definitions = _factor_definitions_by_column(document)
     request = _mapping(document.get("request"))
     summary = _mapping(document.get("summary"))
+    lineage = _mapping(document.get("lineage"))
+    data_version_inputs = _mapping(lineage.get("data_version_inputs"))
+    factor_matrix = _mapping(data_version_inputs.get("factor_matrix"))
+    source_aligned_data = _mapping(data_version_inputs.get("source_aligned_data"))
     index_records = []
     for record in records:
         factor_column = _text(record.get("factor_column"))
@@ -166,6 +170,13 @@ def _build_index_records(
                 "experiment_status": _text(summary.get("status")),
                 "factor_count": summary.get("factor_count"),
                 "factor_manifest_path": _text(document.get("factor_manifest_path")),
+                "git_commit": _text(lineage.get("git_commit")),
+                "git_is_dirty": lineage.get("git_is_dirty"),
+                "config_hash": _text(lineage.get("config_hash")),
+                "factor_manifest_hash": _text(lineage.get("factor_manifest_hash")),
+                "data_version": _text(lineage.get("data_version")),
+                "factor_matrix_path": _text(factor_matrix.get("path")),
+                "source_aligned_data_path": _text(source_aligned_data.get("path")),
                 "output_dir": _text(request.get("output_dir")),
                 "forward_return_days": request.get("forward_return_days"),
                 "quantile_count": request.get("quantile_count"),

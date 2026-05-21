@@ -103,6 +103,13 @@ def test_experiment_agent_runs_factor_batch_and_writes_artifacts(tmp_path: Path)
     saved = json.loads(result_path.read_text(encoding="utf-8"))
     assert saved["selected_factor_columns"] == ["factor__good", "factor__bad"]
     assert saved["factor_definitions"][0]["factor_column"] == "factor__good"
+    assert len(saved["lineage"]["config_hash"]) == 64
+    assert len(saved["lineage"]["factor_manifest_hash"]) == 64
+    assert len(saved["lineage"]["data_version"]) == 64
+    assert saved["lineage"]["data_version_inputs"]["factor_columns"] == [
+        "factor__good",
+        "factor__bad",
+    ]
 
     summary_rows = list(csv.DictReader(summary_path.open(encoding="utf-8")))
     assert [row["factor_column"] for row in summary_rows] == [

@@ -1586,6 +1586,12 @@ Implemented in `quant-agent/`:
     -   `experiment_summary.csv`
 -   experiment history index at `experiments/experiment_index.jsonl`, with one
     denormalized row per factor result
+-   lineage metadata in `experiment_result.json` and the JSONL index:
+    -   git commit
+    -   git dirty state
+    -   stable request configuration hash
+    -   factor manifest hash
+    -   data version fingerprint from factor matrix and source aligned data
 -   structured records for status, failed stage, benchmark status, failed
     benchmark tests, critic verdict, critic severity, metric snapshot, and
     result path
@@ -1642,8 +1648,8 @@ The MVP deliberately evaluates factors that already exist in a persisted factor
 manifest. It does not yet generate new candidate formulas, execute those
 formulas through FeatureAgent, maintain a DuckDB experiment table, expose a
 history query API, or perform sample-out validation. Those capabilities remain
-in the P1 and P2 TODO items because they need stricter data lineage,
-configuration hashes, and train/validation/test boundaries.
+in the P1 and P2 TODO items because they need query contracts and
+train/validation/test boundaries.
 
 ## Project Output Language
 
