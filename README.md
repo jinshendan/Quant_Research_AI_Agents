@@ -1,204 +1,144 @@
 # Quant Research AI Agents
 
-AI-native quantitative research agents for A-share factor research, data
-ingestion, backtesting, memory, reporting, and dashboard review.
+AI-native quantitative research agents for A-share factor research, data ingestion,
+factor generation, backtesting, out-of-sample validation, memory, reporting, and
+dashboard review.
 
 > 中文说明在前，English version follows.
 
 ## 中文说明
 
-### 项目定位
+### 这个项目现在能做什么
 
-`Quant Research AI Agents` 是一个面向个人量化研究的 Agent 系统。它把
-A 股因子研究拆成多个清晰的模块：数据获取、数据清洗、因子假设、因子生成、
-特征计算、回测、结果评估、长期记忆、研究报告和 dashboard 复盘。
+`Quant Research AI Agents` 是一个个人自用的 A 股量化研究工作台。它不是自动交易系统，
+也不会直接告诉你“必须买/必须卖”。它更适合用来回答这些实操问题：
 
-当前项目适合用于：
+- 某只关注股，比如银轮股份 `002126`，在同类股票池里当前因子排名如何？
+- 这个因子历史上是否有基本统计证据，而不是只凭感觉？
+- 回测扣除交易成本后是否仍然过关？
+- 因子在 train / validation / test 或 walk-forward 样本外验证里是否稳定？
+- 报告里是否明确标记该因子“样本外通过 / 未通过 / 未提供验证”？
+- 今天是否适合继续观察、暂缓、或者进入更严格的人工复核？
 
-- 学习量化投资和因子研究流程
-- 离线复现实验和管理研究记录
-- 用 AkShare 拉取 A 股 OHLCV 数据并做基础清洗
-- 批量生成和计算候选因子
-- 做简单 long/short 因子回测
-- 保存因子表现、报告和语义检索索引
-- 作为个人实盘前研究辅助工具
+当前已实现的核心能力：
 
-当前项目不适合直接作为自动交易系统，也不能单独作为真实资金买卖决策依据。
-它已有基础 train / validation / test 和 walk-forward 样本外验证，但仍缺少
-因子衰减、组合管理、实盘风控和完整入场/卖出决策规则。
+- 真实 A 股日线 OHLCV 数据接入、清洗、交易日历对齐、DuckDB 存储和缓存。
+- AkShare 东财历史 K 线失败时可 fallback 到 Sina 日线接口。
+- 因子模板、组合因子、ranking transform、rolling feature。
+- 受限表达式因子执行，用于批量生成候选因子。
+- 单因子回测：IC、RankIC、多空收益、Sharpe、Drawdown、交易成本后 net metrics。
+- Benchmark quality gates 和 CriticAgent。
+- ExperimentAgent / ExperimentStore：批量因子实验、历史索引、lineage 记录。
+- OutOfSampleAgent：train / validation / test、walk-forward、样本内/样本外指标对比。
+- ReportAgent：Markdown 研究报告，并明确显示样本外验证状态。
+- DailyRankingAgent：每日候选股排名和 A 股交易约束提示。
+- MemoryAgent、Factor Wiki、FAISS 语义检索、Streamlit dashboard。
+- 中英双语输出：`bilingual`、`zh`、`en`。
 
-### 已实现功能
+当前还没有完成：
 
-| 能力 | 状态 | 说明 |
-| --- | --- | --- |
-| Agent 通信协议 | 已实现 | 统一 `AgentRequest` / `AgentResponse` |
-| 配置和日志 | 已实现 | 环境变量配置、结构化日志 |
-| A 股数据获取 | 已实现 | AkShare 日线 OHLCV、指数成分股 alias |
-| 数据清洗 | 已实现 | 缺失值、重复值、无效价格、停牌或无成交行处理 |
-| 交易日历对齐 | 已实现 | 生成 symbol/date 网格，标记缺失或停牌 |
-| DuckDB 持久化 | 已实现 | 保存 aligned OHLCV 和运行元数据 |
-| 市场数据缓存 | 已实现 | 文件缓存、cache hit、force refresh、stale artifact 检查 |
-| 数据可靠性 | 已实现 | 单票重试、symbol 间 sleep、部分失败隔离、失败 manifest、AkShare smoke diagnostic、历史行情备用接口 |
-| HypothesisAgent | 已实现 | 生成结构化 alpha 假设 |
-| 因子模板库 | 已实现 | 动量、反转、波动率、流动性、突破等模板 |
-| FeatureAgent | 已实现 | 计算因子矩阵、组合因子、ranking transform、rolling feature |
-| FactorDefinitionRegistry | 已实现 | 为模板因子和组合因子保存公式、假设、类别、来源、lookback、data lag |
-| FactorExpression | 已实现 | 执行受限候选公式语法，支持 delay、mean、std、zscore、slope、max_drawdown 等函数 |
-| FactorGenerationAgent | 已实现 | 生成 90 个确定性候选因子，覆盖动量、反转、量价、波动率、流动性、突破和组合类 |
-| ExperimentAgent | 已实现 MVP | 批量回测 factor manifest 或自动生成候选公式，并调用 CriticAgent 审查 |
-| ExperimentStore | 已实现 MVP | 保存单次实验 JSON、CSV 汇总、JSONL 历史索引、lineage 元数据和历史查询 |
-| BacktestAgent | 已实现 | long/short return、IC、RankIC、Sharpe、Drawdown |
-| OutOfSampleAgent | 已实现 MVP | 按 train / validation / test 或 walk-forward 信号日期切分复用 BacktestAgent，并保存样本外验证 JSON、CSV 汇总和样本内/样本外指标对比 |
-| 交易成本模型 | 已实现 | 佣金、印花税、过户费、滑点、换手率、gross/net 指标 |
-| Benchmark tests | 已实现 | 对回测结果做确定性质量门槛检查，默认检查样本数、RankIC、净夏普、净收益、回撤和分组股票数 |
-| CriticAgent | 已实现 | 将 benchmark 失败项翻译成 track/revise/reject 审查结论 |
-| MemoryAgent | 已实现 | 保存因子研究记录到 JSONL |
-| FAISS 语义检索 | 已实现 | 对因子记忆做本地向量索引和搜索 |
-| Factor wiki | 已实现 | 自动生成因子知识库 Markdown |
-| ReportAgent | 已实现 | 生成结构化研究报告和 Markdown 报告，可标记样本外验证是否通过 |
-| 中英双语输出 | 已实现 | 报告、Factor Wiki、daily 摘要、AkShare smoke、dashboard 支持 `en` / `zh` / `bilingual` |
-| DailyRankingAgent | 已实现 | 生成每日 Top N 候选股票排名 CSV 和 Markdown |
-| A 股交易约束 | 已实现 | T+1 提示、涨跌停标记、ST/停牌/新股/退市风险过滤或标记 |
-| Streamlit dashboard | 已实现 | 因子排名、指标分布、报告列表 |
-| Factor Explorer | 已实现 | 查看单个因子记录、诊断和关联报告 |
-| Semantic Search UI | 已实现 | dashboard 中搜索历史因子记忆 |
-| 端到端离线测试 | 已实现 | 覆盖 DataAgent 到 Dashboard/Search 的 artifact handoff |
-| Daily research pipeline | 已实现 | 配置驱动运行 DataAgent 到 ReportAgent，显式记录最终使用的因子列并保存 manifest |
+- 因子衰减测试：1D / 3D / 5D / 10D / 20D IC decay curve。
+- 因子相关性控制和多因子 alpha 选择。
+- DecisionAgent：单票入场、退出、反证条件。
+- PortfolioAgent：仓位、组合风险、paper trading log。
 
-### 核心模块
+### 一次完整实操分析应该怎么看
 
-| 模块 | 文件 | 用途 |
-| --- | --- | --- |
-| DataAgent | `quant-agent/agents/data_agent.py` | 获取、清洗、对齐、缓存并保存市场数据 |
-| FeatureAgent | `quant-agent/agents/feature_agent.py` | 从 aligned OHLCV 计算单因子和组合因子矩阵 |
-| Factor registry | `quant-agent/agents/factor_registry.py` | 管理因子定义、组合因子配置和因子来源元数据 |
-| Factor expression | `quant-agent/agents/factor_expression.py` | 安全执行 FactorGenerationAgent 生成的参数化候选公式 |
-| FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | 生成候选因子定义 |
-| ExperimentAgent | `quant-agent/agents/experiment_agent.py` | 批量评估 factor manifest 中的多个因子 |
-| ExperimentStore | `quant-agent/agents/experiment_store.py` | 保存实验结果、汇总表、历史索引、lineage 元数据和查询结果 |
-| BacktestAgent | `quant-agent/agents/backtest_agent.py` | 回测单个因子并生成评估指标 |
-| OutOfSampleAgent | `quant-agent/agents/out_of_sample_agent.py` | 按 train / validation / test 或 walk-forward 切分验证单个因子的样本外表现 |
-| Transaction Costs | `quant-agent/agents/transaction_costs.py` | 统一管理 A 股交易成本假设和换手成本估算 |
-| CriticAgent | `quant-agent/agents/critic_agent.py` | 审查回测质量并解释失败原因 |
-| MemoryAgent | `quant-agent/agents/memory_agent.py` | 保存因子研究记录和 FAISS 索引 |
-| ReportAgent | `quant-agent/agents/report_agent.py` | 生成 Markdown 研究报告，并显示样本外验证状态 |
-| A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | 统一生成 A 股交易约束标签 |
-| DailyRankingAgent | `quant-agent/agents/daily_ranking.py` | 生成每日候选股票排名 |
-| I18N | `quant-agent/core/i18n.py` | 统一管理中英双语输出标签 |
-| Daily Research | `quant-agent/scripts/run_daily_research.py` | 串联每日研究 pipeline 并输出运行清单 |
-| Dashboard | `quant-agent/dashboard.py` | 交互式查看因子、报告和语义搜索 |
-| AkShare Smoke | `quant-agent/scripts/run_akshare_smoke.py` | 真实 AkShare 连接与数据质量诊断 |
+实操时不要只看一个排名。建议按这个顺序判断：
 
-### 技术栈
+1. 数据是否成功：AkShare smoke、失败股票、缺失/停牌。
+2. 股票池是否合理：银轮股份不能只和随机股票比较，最好和汽车零部件、新能源车、商用车链条相关标的比较。
+3. 因子定义是否清楚：公式、方向、lookback、data lag。
+4. 回测是否过关：RankIC、net Sharpe、net total return、max drawdown、turnover。
+5. CriticAgent 是否允许继续跟踪：`track` 优于 `revise`，`reject_for_now` 不应进入实盘观察。
+6. 样本外是否通过：报告中的 `Out-of-sample Validation / 样本外验证` 不能是 `not_provided`。
+7. 单票是否有约束：涨跌停、停牌、ST、新股、退市风险、T+1 提示。
+8. 最后人工判断：本项目输出是研究辅助，不是投资建议。
 
-- Python 3.11+
-- Pandas, NumPy
-- AkShare
-- DuckDB
-- FAISS
-- Streamlit
-- pytest, ruff, mypy
-
-### 当前研究流程
-
-```text
-Market Data
-  -> DataAgent
-  -> HypothesisAgent
-  -> FeatureAgent / FactorGenerationAgent
-  -> BacktestAgent
-  -> OutOfSampleAgent
-  -> CriticAgent
-  -> MemoryAgent
-  -> ReportAgent
-  -> Streamlit Dashboard
-```
-
-### 快速开始
-
-克隆项目：
+### 快速安装
 
 ```bash
 git clone https://github.com/jinshendan/Quant_Research_AI_Agents.git
 cd Quant_Research_AI_Agents/quant-agent
-```
-
-创建虚拟环境：
-
-```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-安装依赖：
-
-```bash
 python -m pip install -r requirements-dev.txt
-```
-
-配置输出语言：
-
-```bash
 export QUANT_AGENT_OUTPUT_LANGUAGE=bilingual
 ```
 
-可选值：
-
-- `bilingual`: 中英双语，默认值
-- `zh`: 中文
-- `en`: 英文
-
-结构化 JSON 字段名仍保持英文，避免破坏 agent 之间的接口；人类可读的报告、
-Factor Wiki、终端摘要、AkShare smoke 建议和 dashboard 标签会根据语言配置输出。
-
-运行基础 smoke test：
+验证基础环境：
 
 ```bash
 python app.py
+python -m pytest
+python -m ruff check .
+python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.py scripts/run_daily_research.py
 ```
 
-运行真实 AkShare 诊断：
+启动 dashboard：
+
+```bash
+streamlit run dashboard.py
+```
+
+### Step 1：先检查真实数据源
+
+以银轮股份 `002126` 为例，先跑 AkShare 诊断：
 
 ```bash
 python scripts/run_akshare_smoke.py \
-  --symbol 000001 \
-  --start-date 2024-01-02 \
-  --end-date 2024-01-03 \
+  --symbol 002126 \
+  --start-date 2024-05-01 \
+  --end-date 2024-05-10 \
   --symbol-sleep-sec 0.2 \
   --output-language bilingual \
-  --output /tmp/akshare-smoke.json
+  --output /tmp/akshare-smoke-002126.json
 ```
 
-AkShare smoke test 会输出 JSON 诊断报告到 stdout，日志输出到 stderr。
-如果 AkShare 的东方财富历史 K 线接口被远端断开，DataAgent 会自动 fallback 到
-AkShare 的 Sina 日线接口，并继续归一化为统一 OHLCV schema。
 退出码含义：
 
 - `0`: 成功
 - `1`: 失败
-- `2`: 部分成功，例如部分股票下载失败
+- `2`: 部分成功
 
-运行每日研究 pipeline：
+如果远端接口断开，先看 `/tmp/akshare-smoke-002126.json` 中的 provider、错误类型和建议；
+daily pipeline 会做重试和备用接口，但真实数据源不稳定时，不应该直接相信当日输出。
 
-```bash
-python scripts/run_daily_research.py --config /path/to/daily_research.json
-```
+### Step 2：为银轮股份建立可比股票池
 
-最小 JSON 配置示例：
+下面是一个可以直接跑的示例。股票池里除了银轮股份，也放了汽车链条和制造业相关标的，
+用于横截面排名。你后续应该逐步替换为更严谨的行业/主题股票池。
+
+在 `quant-agent/tmp/yinlun_daily.json` 中准备配置：
 
 ```json
 {
-  "run_id": "daily-demo",
-  "universe": "custom_batch",
-  "symbols": ["000001", "000002", "000003", "000004", "000005"],
-  "start_date": "2024-01-01",
-  "end_date": "2024-03-31",
+  "run_id": "yinlun-002126-daily",
+  "universe": "yinlun_watchlist",
+  "symbols": ["002126", "000338", "002594", "601689", "600741", "000625"],
+  "start_date": "2023-01-01",
+  "end_date": "2026-05-19",
   "output_dir": "daily_runs",
-  "template_ids": ["close_to_open_return"],
-  "factor_column": "factor__close_to_open_return",
-  "factor_set_name": "daily_demo",
+  "use_cache": true,
+  "max_retries": 2,
+  "retry_backoff_sec": 0.5,
+  "symbol_sleep_sec": 0.2,
+  "template_ids": ["close_to_open_return", "return_5d", "volume_ratio_5d_20d"],
+  "composite_factors": [
+    {
+      "name": "yinlun_blend_v1",
+      "normalize": "rank_pct",
+      "components": [
+        {"factor": "close_to_open_return", "weight": 0.4},
+        {"factor": "return_5d", "weight": 0.4},
+        {"factor": "volume_ratio_5d_20d", "weight": 0.2}
+      ]
+    }
+  ],
+  "factor_column": "factor__yinlun_blend_v1",
+  "factor_set_name": "yinlun_watchlist",
   "factor_direction": "positive",
-  "quantile_count": 5,
+  "quantile_count": 3,
   "ranking_top_n": 10,
   "transaction_costs": {
     "enabled": true,
@@ -220,209 +160,219 @@ python scripts/run_daily_research.py --config /path/to/daily_research.json
   },
   "output_language": "bilingual",
   "factor_metadata": {
-    "name": "daily_close_to_open",
-    "formula": "close / open - 1",
-    "hypothesis": "Intraday strength may persist into next-day returns."
+    "name": "yinlun_blend_v1",
+    "formula": "0.4 * rank_pct(close_to_open_return) + 0.4 * rank_pct(return_5d) + 0.2 * rank_pct(volume_ratio_5d_20d)",
+    "hypothesis": "银轮股份与汽车产业链相关标的中，短期强势和量能变化可能有持续性。"
   }
 }
 ```
 
-如果 `template_ids` 里配置多个模板，它们只是多个独立候选因子，不会自动变成组合因子。
-这时必须显式设置 `factor_column`；否则 pipeline 会停止并提示你选择目标因子。
-如确实要使用多个弱信号组合，可以使用 `composite_factors`：
+注意：`end_date` 应使用最新一个已经完成的交易日。不要用还没收盘的日期做日线研究。
 
-```json
-{
-  "template_ids": ["close_to_open_return", "return_5d", "volume_ratio_5d_20d"],
-  "composite_factors": [
-    {
-      "name": "daily_blend_v1",
-      "normalize": "rank_pct",
-      "components": [
-        {"factor": "close_to_open_return", "weight": 0.4},
-        {"factor": "return_5d", "weight": 0.4},
-        {"factor": "volume_ratio_5d_20d", "weight": 0.2}
-      ]
-    }
-  ],
-  "factor_column": "factor__daily_blend_v1"
-}
+### Step 3：运行每日研究 pipeline
+
+```bash
+python scripts/run_daily_research.py --config tmp/yinlun_daily.json
 ```
 
-`normalize` 支持 `none`、`rank_pct` 和 `zscore`。组合因子会写入 factor matrix、
-factor manifest 和 daily research manifest。`factor_definitions` 会保存每个因子的
-`source_type`、`formula`、`hypothesis`、`category`、`direction`、`lookback_days`
-和 `data_lag_days`；研究报告和 Factor Wiki 也会显示这些字段。
+成功后重点看这些文件：
 
-该脚本会依次运行 `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent
--> DailyRankingAgent -> MemoryAgent -> ReportAgent`，并在 `output_dir/run_id/daily_research_manifest.json` 保存
-本次运行清单和关键 artifact 路径。
-同时会生成每日候选股排名：
+```text
+daily_runs/yinlun-002126-daily/daily_research_manifest.json
+daily_runs/yinlun-002126-daily/daily_stock_ranking.csv
+daily_runs/yinlun-002126-daily/daily_stock_ranking.md
+daily_runs/yinlun-002126-daily/backtest_result.json
+daily_runs/yinlun-002126-daily/research_report.md
+memory/factor_memory.jsonl
+memory/factor_wiki.md
+```
 
-- `output_dir/run_id/daily_stock_ranking.csv`
-- `output_dir/run_id/daily_stock_ranking.md`
+查看本次运行的 artifact 路径：
 
-排名包含因子分数、排名、近 5 日收益、20 日波动率、20 日回撤、换手率、
-交易约束、入选理由和风险提示。默认约束会过滤停牌/缺失、ST、新股和退市风险；
-涨跌停默认标记但不过滤，可通过 `trading_constraints.exclude_limit_up` 和
-`trading_constraints.exclude_limit_down` 收紧。回测、报告、记忆和 dashboard 会保留
-交易成本假设、gross 指标和 net 指标；每日股票排名仍是研究辅助输出，不负责仓位管理。
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
 
-运行 dashboard：
+manifest = json.loads(
+    Path("daily_runs/yinlun-002126-daily/daily_research_manifest.json").read_text()
+)
+print(json.dumps(manifest["summary"], ensure_ascii=False, indent=2))
+print(json.dumps(manifest["artifacts"], ensure_ascii=False, indent=2))
+PY
+```
+
+### Step 4：读每日输出时看什么
+
+先看 `daily_stock_ranking.md`：
+
+- 银轮股份是否进入靠前排名？
+- 它的 `factor_score` 是正向还是偏弱？
+- 近 5 日收益、20 日波动率、20 日回撤是否过热？
+- 交易约束里是否有涨跌停、停牌、ST、新股、退市风险提示？
+
+再看 `research_report.md`：
+
+- `Benchmark status / 基准状态` 是否 `passed`。
+- `CriticAgent` 的结论是否是 `track`。
+- `Transaction cost stats / 交易成本统计` 是否已经扣成本。
+- `Out-of-sample status / 样本外状态` 如果是 `not_provided`，说明这份 daily 报告还没有接入样本外验证，不能作为实盘前的强证据。
+
+### Step 5：对目标因子做样本外验证
+
+daily pipeline 会生成当日研究报告，但不会自动跑完整样本外验证。要把一个因子提升为更严肃的候选 alpha，需要单独运行 `OutOfSampleAgent`。
+
+下面示例会读取 daily run 产生的 factor manifest，对 `factor__yinlun_blend_v1` 做
+train / validation / test 验证：
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+from agents.out_of_sample_agent import OutOfSampleAgent
+from core.models import AgentRequest
+
+manifest = json.loads(
+    Path("daily_runs/yinlun-002126-daily/daily_research_manifest.json").read_text()
+)
+factor_manifest_path = manifest["artifacts"]["factor_manifest_path"]
+
+response = OutOfSampleAgent().run(
+    AgentRequest.create(
+        {
+            "factor_manifest_path": factor_manifest_path,
+            "factor_column": "factor__yinlun_blend_v1",
+            "validation_id": "yinlun_blend_v1_oos",
+            "output_dir": "validations",
+            "splits": [
+                {"name": "train", "start_date": "2023-01-01", "end_date": "2024-06-30"},
+                {"name": "validation", "start_date": "2024-07-01", "end_date": "2025-06-30"},
+                {"name": "test", "start_date": "2025-07-01", "end_date": "2026-05-19"}
+            ],
+            "factor_direction": "positive",
+            "forward_return_days": 1,
+            "quantile_count": 3,
+            "benchmark_thresholds": {
+                "min_mean_rank_ic": 0.02,
+                "min_sharpe": 0.3,
+                "min_total_return": 0.0,
+                "max_drawdown_abs": 0.35
+            }
+        }
+    )
+)
+
+print(response.status)
+print(response.output["summary"]["basic_oos_check"])
+print(response.output["summary"]["metric_comparison"])
+print(response.output["storage_stats"]["result_path"])
+PY
+```
+
+请以 `daily_research_manifest.json` 里的 `artifacts.factor_manifest_path` 为准，
+不要手写猜测 factor manifest 文件名。
+
+也可以做 walk-forward：
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+
+from agents.out_of_sample_agent import OutOfSampleAgent
+from core.models import AgentRequest
+
+manifest = json.loads(
+    Path("daily_runs/yinlun-002126-daily/daily_research_manifest.json").read_text()
+)
+factor_manifest_path = manifest["artifacts"]["factor_manifest_path"]
+
+response = OutOfSampleAgent().run(
+    AgentRequest.create(
+        {
+            "factor_manifest_path": factor_manifest_path,
+            "factor_column": "factor__yinlun_blend_v1",
+            "validation_id": "yinlun_blend_v1_walk_forward",
+            "output_dir": "validations",
+            "walk_forward": {
+                "start_date": "2023-01-01",
+                "end_date": "2026-05-19",
+                "train_window_days": 504,
+                "test_window_days": 126,
+                "step_days": 126
+            },
+            "factor_direction": "positive",
+            "forward_return_days": 1,
+            "quantile_count": 3
+        }
+    )
+)
+
+print(response.output["summary"]["walk_forward_check"])
+print(response.output["summary"]["metric_comparison"])
+print(response.output["storage_stats"]["result_path"])
+PY
+```
+
+### Step 6：生成带样本外标记的报告
+
+如果你已经跑了样本外验证，用 `ReportAgent` 重新生成报告，并传入 `out_of_sample_result_path`：
+
+```bash
+python - <<'PY'
+from agents.report_agent import ReportAgent
+from core.models import AgentRequest
+
+response = ReportAgent().run(
+    AgentRequest.create(
+        {
+            "memory_path": "memory/factor_memory.jsonl",
+            "factor_name": "yinlun_blend_v1",
+            "factor_wiki_path": "memory/factor_wiki.md",
+            "out_of_sample_result_path": "validations/yinlun_blend_v1_oos/out_of_sample_result.json",
+            "report_path": "daily_runs/yinlun-002126-daily/research_report_oos.md",
+            "output_language": "bilingual"
+        }
+    )
+)
+
+print(response.output["report_path"])
+PY
+```
+
+报告里的关键字段：
+
+- `Out-of-sample status / 样本外状态`
+- `Out-of-sample passed / 样本外是否通过`
+- `Basic OOS status / 基础样本外状态`
+- `Walk-forward status / 滚动验证状态`
+- `Out-of-sample mean RankIC / 样本外平均 RankIC`
+- `Out-of-sample net Sharpe / 样本外扣成本后夏普`
+- `Out-of-sample net total return / 样本外扣成本后总收益`
+
+如果样本外状态不是 `passed`，不要把这个因子用于实盘观察，只能继续研究或修改。
+
+### Step 7：打开 dashboard 复盘
 
 ```bash
 streamlit run dashboard.py
 ```
 
-运行测试和静态检查：
+dashboard 可以用来查看：
+
+- 历史因子记忆
+- 因子表现分布
+- 单因子诊断
+- 历史报告
+- 语义搜索
+
+### 批量挖掘因子
+
+当你不只想看一个模板因子，而是想更接近 Quant Researcher 的工作方式，可以让 ExperimentAgent 生成候选因子并批量回测：
 
 ```bash
-python -m pytest
-python -m ruff check .
-python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.py scripts/run_daily_research.py
-```
-
-### 如何使用
-
-#### 1. 下载并准备市场数据
-
-```python
-from agents.data_agent import DataAgent
-from core.models import AgentRequest
-
-request = AgentRequest.create(
-    {
-        "universe": "custom_batch",
-        "symbols": ["000001", "000002"],
-        "start_date": "2024-01-02",
-        "end_date": "2024-01-03",
-        "provider": "akshare",
-        "frequency": "daily",
-        "max_retries": 2,
-        "retry_backoff_sec": 0.5,
-        "symbol_sleep_sec": 0.2,
-        "continue_on_symbol_error": True,
-    }
-)
-
-response = DataAgent().run(request)
-print(response.output["aligned_data_path"])
-print(response.output["download_stats"])
-```
-
-支持的 AkShare 指数别名：
-
-- `CSI300`
-- `CSI500`
-- `CSI1000`
-- `SSE50`
-
-#### 2. 计算因子矩阵
-
-```python
-from agents.feature_agent import FeatureAgent
-from core.models import AgentRequest
-
-request = AgentRequest.create(
-    {
-        "aligned_data_path": "data/processed/aligned_ohlcv_akshare_custom_batch_daily_none_20240102_20240103.csv",
-        "template_ids": ["return_5d", "volume_ratio_5d_20d"],
-        "composite_factors": [
-            {
-                "name": "momentum_volume_blend",
-                "normalize": "rank_pct",
-                "components": [
-                    {"factor": "return_5d", "weight": 0.6},
-                    {"factor": "volume_ratio_5d_20d", "weight": 0.4},
-                ],
-            }
-        ],
-        "rank_transforms": ["rank_pct"],
-        "rolling_features": ["mean", "zscore"],
-        "rolling_windows": [5, 20],
-        "factor_set_name": "custom_batch_research",
-        "save_factors": True,
-    }
-)
-
-response = FeatureAgent().run(request)
-print(response.output["storage_stats"]["matrix_path"])
-print(response.output["storage_stats"]["manifest_path"])
-```
-
-#### 3. 回测一个因子
-
-```python
-from agents.backtest_agent import BacktestAgent
-from core.models import AgentRequest
-
-request = AgentRequest.create(
-    {
-        "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
-        "factor_column": "factor__return_5d",
-        "factor_direction": "positive",
-        "forward_return_days": 1,
-        "quantile_count": 5,
-        "transaction_costs": {
-            "enabled": True,
-            "commission_rate": 0.0003,
-            "stamp_duty_rate": 0.0005,
-            "transfer_fee_rate": 0.00001,
-            "slippage_rate": 0.0005,
-        },
-        "result_json_path": "results/backtests/custom_batch_return_5d.json",
-    }
-)
-
-response = BacktestAgent().run(request)
-print(response.output["ic_stats"])
-print(response.output["rank_ic_stats"])
-print(response.output["sharpe_stats"])
-print(response.output["gross_sharpe_stats"])
-print(response.output["cost_stats"])
-print(response.output["drawdown_stats"])
-```
-
-#### 4. 批量运行因子实验
-
-```python
-from agents.experiment_agent import ExperimentAgent
-from core.models import AgentRequest
-
-request = AgentRequest.create(
-    {
-        "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
-        "experiment_id": "custom_batch_experiment_v1",
-        "factor_columns": ["factor__return_5d", "factor__momentum_volume_blend"],
-        "quantile_count": 5,
-        "benchmark_thresholds": {
-            "min_mean_rank_ic": 0.02,
-            "min_sharpe": 0.5,
-            "min_total_return": 0.0,
-            "max_drawdown_abs": 0.35
-        },
-        "output_dir": "experiments",
-        "output_language": "bilingual"
-    }
-)
-
-response = ExperimentAgent().run(request)
-print(response.output["summary"])
-print(response.output["storage_stats"]["result_path"])
-print(response.output["storage_stats"]["summary_path"])
-```
-
-当前 ExperimentAgent MVP 会批量评估已有 factor manifest 中的因子列，逐个调用
-BacktestAgent 和 CriticAgent，并保存实验 JSON、CSV 汇总表、JSONL 历史索引和
-lineage 元数据。lineage 包含 git commit、dirty 状态、配置 hash、factor manifest
-hash 和数据版本指纹。
-
-也可以让 ExperimentAgent 先生成候选因子，再自动调用 FeatureAgent 保存 factor
-manifest，然后批量回测。当前实现会直接执行 FactorGenerationAgent 生成的受限
-参数化表达式，而不是把候选因子降级映射到旧模板。生成后的因子列使用
-`factor__alpha_001`、`factor__alpha_002` 这类候选 ID。
-
-```python
+python - <<'PY'
 from agents.experiment_agent import ExperimentAgent
 from core.models import AgentRequest
 
@@ -431,285 +381,105 @@ response = ExperimentAgent().run(
         {
             "aligned_data_path": "data/processed/aligned_ohlcv_demo.csv",
             "candidate_generation": {
-                "target_count": 20,
-                "source_template_ids": ["return_5d", "volume_ratio_5d_20d"],
+                "target_count": 30,
+                "source_template_ids": ["return_5d", "volume_ratio_5d_20d"]
             },
             "factor_set_name": "auto_candidate_batch",
             "experiment_id": "auto-candidates-v1",
             "output_dir": "experiments",
             "quantile_count": 5,
+            "output_language": "bilingual"
         }
     )
 )
-print(response.output["candidate_generation"]["execution"])
-print(response.output["factor_manifest_path"])
+
+print(response.output["summary"])
+print(response.output["storage_stats"]["summary_path"])
+PY
 ```
 
-查询历史实验：
+历史实验查询：
 
-```python
+```bash
+python - <<'PY'
 from agents.experiment_store import ExperimentQuerySpec, ExperimentStore
 
-store = ExperimentStore("experiments")
-result = store.query(
+result = ExperimentStore("experiments").query(
     ExperimentQuerySpec(
         factor_categories=("momentum",),
         benchmark_statuses=("passed",),
-        critic_verdicts=("track",),
-        created_at_start="2026-05-01",
-        created_at_end="2026-05-31",
+        critic_verdicts=("track",)
     )
 )
 
 for record in result.records:
     print(record["experiment_id"], record["factor_column"], record["mean_rank_ic"])
-```
-
-#### 5. 做 train / validation / test 样本外验证
-
-```python
-from agents.out_of_sample_agent import OutOfSampleAgent
-from core.models import AgentRequest
-
-response = OutOfSampleAgent().run(
-    AgentRequest.create(
-        {
-            "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
-            "factor_column": "factor__return_5d",
-            "validation_id": "return_5d_oos_v1",
-            "output_dir": "validations",
-            "splits": [
-                {"name": "train", "start_date": "2020-01-01", "end_date": "2022-12-31"},
-                {"name": "validation", "start_date": "2023-01-01", "end_date": "2023-12-31"},
-                {"name": "test", "start_date": "2024-01-01", "end_date": "2025-12-31"}
-            ],
-            "factor_direction": "positive",
-            "forward_return_days": 1,
-            "quantile_count": 5,
-            "benchmark_thresholds": {
-                "min_mean_rank_ic": 0.02,
-                "min_sharpe": 0.5,
-                "min_total_return": 0.0,
-                "max_drawdown_abs": 0.35
-            }
-        }
-    )
-)
-
-print(response.output["summary"]["basic_oos_check"])
-print(response.output["summary"]["metric_comparison"])
-print(response.output["storage_stats"]["result_path"])
-print(response.output["storage_stats"]["summary_path"])
-```
-
-也可以用滚动 walk-forward 验证：
-
-```python
-response = OutOfSampleAgent().run(
-    AgentRequest.create(
-        {
-            "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
-            "factor_column": "factor__return_5d",
-            "validation_id": "return_5d_walk_forward_v1",
-            "output_dir": "validations",
-            "walk_forward": {
-                "start_date": "2020-01-01",
-                "end_date": "2025-12-31",
-                "train_window_days": 504,
-                "test_window_days": 126,
-                "step_days": 126
-            },
-            "factor_direction": "positive",
-            "forward_return_days": 1,
-            "quantile_count": 5
-        }
-    )
-)
-
-print(response.output["summary"]["walk_forward_check"])
-print(response.output["summary"]["metric_comparison"])
-```
-
-OutOfSampleAgent 按“信号日期”切分样本。也就是说，`start_date` 和 `end_date`
-限定的是因子信号所在日期，`forward_return_days` 对应的未来收益仍由 BacktestAgent
-按统一逻辑计算。它会为每个 split 保存一个 BacktestAgent 结果 JSON，并在
-`summary.metric_comparison` 中比较样本内和样本外的 IC、RankIC、net Sharpe、
-最大回撤、平均换手和成本后收益。它额外保存：
-
-- `validations/{validation_id}/out_of_sample_result.json`
-- `validations/{validation_id}/out_of_sample_summary.csv`
-
-#### 6. 保存研究记忆并生成报告
-
-```python
-from agents.memory_agent import MemoryAgent
-from agents.report_agent import ReportAgent
-from core.models import AgentRequest
-
-memory_response = MemoryAgent().run(
-    AgentRequest.create(
-        {
-            "result_json_path": "results/backtests/custom_batch_return_5d.json",
-            "factor_metadata": {
-                "name": "custom_return_5d",
-                "formula": "return_5d",
-                "hypothesis": "Short-term momentum may persist.",
-            },
-            "output_language": "bilingual",
-        }
-    )
-)
-
-report_response = ReportAgent().run(
-    AgentRequest.create(
-        {
-            "memory_path": memory_response.output["memory_path"],
-            "factor_name": "custom_return_5d",
-            "out_of_sample_result_path": "validations/return_5d_oos_v1/out_of_sample_result.json",
-            "output_language": "bilingual",
-        }
-    )
-)
-
-print(report_response.output["report_path"])
+PY
 ```
 
 ### 主要目录
 
 ```text
-.
-├── README.md
-├── TODO.md
-├── TASKS.md
-├── ARCHITECTURE.md
-└── quant-agent/
-    ├── agents/              # Agent 和核心研究模块
-    ├── core/                # 配置、日志、协议模型
-    ├── data/                # raw、processed、cache、failures
-    ├── experiments/         # 本地实验结果，默认不提交 Git
-    ├── factors/             # generated、validated、rejected
-    ├── memory/              # factor_memory、FAISS index、factor wiki
-    ├── research_logs/       # Markdown 研究报告
-    ├── validations/         # 样本外验证结果，默认不提交 Git
-    ├── scripts/             # 可执行辅助脚本
-    ├── tests/               # 单元测试和端到端测试
-    ├── app.py
-    └── dashboard.py
+quant-agent/
+├── agents/              # Agent 和核心研究模块
+├── core/                # 配置、日志、协议模型
+├── data/                # raw、processed、cache、failures
+├── daily_runs/          # 每日研究输出，默认不提交 Git
+├── experiments/         # 本地实验结果，默认不提交 Git
+├── factors/             # generated、validated、rejected
+├── memory/              # factor_memory、FAISS index、factor wiki
+├── research_logs/       # Markdown 研究报告
+├── validations/         # 样本外验证结果，默认不提交 Git
+├── scripts/             # run_daily_research.py、run_akshare_smoke.py
+├── tests/
+├── app.py
+└── dashboard.py
 ```
 
 ### 后续开发计划
 
-当前路线图保存在 `TODO.md`。优先级如下：
+路线图保存在 `TODO.md`。当前优先级：
 
-| 优先级 | 计划 |
-| --- | --- |
-| P0 | 已完成因子选择、组合因子和因子定义注册表 |
-| P1 | 已完成 ExperimentAgent / ExperimentStore MVP、JSONL 历史索引、lineage 记录、历史查询、候选公式执行和扩展候选空间 |
-| P2 | 已加入 train / validation / test、walk-forward、样本内/样本外指标对比和报告样本外标记；下一步加入因子衰减和稳健性检查 |
-| P3 | 做因子相关性分析、多因子 alpha 选择和候选池管理 |
-| P4 | 构建 DecisionAgent，把关注股转成观察/试错/回避/退出结论 |
-| P5 | 构建 PortfolioAgent、paper trading log 和组合风控 |
+- P2：因子衰减测试、稳健性和分层评估、数据泄漏和偏差检查。
+- P3：因子相关性分析、多因子 alpha 选择、Alpha 候选池。
+- P4：DecisionAgent，服务单票观察、入场、退出、反证条件。
+- P5：PortfolioAgent、仓位、组合风险、paper trading log。
+- P6：行业主题数据、基础面估值数据、市场状态数据。
 
-### 重要提醒
+### 重要边界
 
-本项目输出是研究辅助信息，不是投资建议。任何真实交易都需要人工复核数据质量、
-样本外表现、交易成本、流动性、仓位、风险暴露和市场环境。
+- 这不是投资建议。
+- 这不是自动交易系统。
+- 通过回测不等于未来能赚钱。
+- 没有通过样本外验证的因子，只能作为研究材料。
+- 任何真实交易都需要人工复核：数据质量、样本外表现、交易成本、流动性、仓位、风险暴露、市场环境。
 
 ## English Version
 
-### What This Project Is
+### What This Project Does
 
-`Quant Research AI Agents` is a personal quant research assistant for A-share
-factor research. It decomposes the research workflow into modular agents for
-data ingestion, cleaning, hypothesis generation, factor computation, backtesting,
-memory, reporting, and dashboard review.
+`Quant Research AI Agents` is a personal A-share quant research workbench. It is
+not an automated trading system and should not be used as the sole basis for
+real-money decisions.
 
-It is useful for:
+It helps you:
 
-- learning quantitative investing and factor research
-- running reproducible offline experiments
-- downloading and preparing A-share OHLCV data with AkShare
-- generating and computing factor candidates
-- running simple long/short factor backtests
-- storing factor results, reports, and semantic search indexes
-- supporting human-reviewed daily research
+- ingest and clean real A-share OHLCV data;
+- compute template, composite, rolling, ranking, and generated factors;
+- run factor backtests with transaction costs;
+- apply deterministic benchmark gates and CriticAgent review;
+- run train / validation / test and walk-forward out-of-sample validation;
+- compare in-sample and out-of-sample IC, RankIC, net Sharpe, drawdown,
+  turnover, and net return;
+- generate reports that explicitly mark out-of-sample status;
+- build daily stock rankings and review them in a dashboard.
 
-It is not an automated trading system and should not be used as the sole basis
-for real-money trading decisions. It now supports explicit train / validation /
-test and walk-forward out-of-sample validation, while factor decay, portfolio
-management, live risk controls, and complete entry/exit rules remain future work.
+Still missing:
 
-### Implemented Features
-
-| Capability | Status | Notes |
-| --- | --- | --- |
-| Agent protocol | Done | Shared `AgentRequest` / `AgentResponse` |
-| Config and logging | Done | Env-based config and structured logs |
-| A-share data ingestion | Done | AkShare daily OHLCV and index aliases |
-| OHLCV cleaning | Done | Missing values, duplicates, invalid prices, no-trade rows |
-| Trading calendar alignment | Done | Symbol/date grid with missing or suspended flags |
-| DuckDB storage | Done | Aligned OHLCV and run metadata |
-| Market data cache | Done | File cache, cache hit, force refresh, stale artifact checks |
-| Data reliability | Done | Retry, symbol sleep, partial success, failure manifest, AkShare smoke diagnostics, historical-data fallback |
-| HypothesisAgent | Done | Structured alpha hypotheses |
-| Factor templates | Done | Momentum, reversal, volatility, liquidity, breakout templates |
-| FeatureAgent | Done | Factor matrices, composite factors, ranking transforms, rolling features |
-| FactorDefinitionRegistry | Done | Formula, hypothesis, category, source type, lookback, and data-lag metadata for template and composite factors |
-| FactorExpression | Done | Executes a restricted generated-formula grammar with delay, mean, std, zscore, slope, max_drawdown, and related functions |
-| FactorGenerationAgent | Done | 90 deterministic candidates across momentum, reversal, volume-price, volatility, liquidity, breakout, and composite families |
-| ExperimentAgent | MVP done | Batch-backtests factors from a manifest or generated candidate formulas and critiques them |
-| ExperimentStore | MVP done | Stores experiment JSON, CSV summary, JSONL history index, lineage metadata, and query results |
-| BacktestAgent | Done | Long/short return, IC, RankIC, Sharpe, drawdown |
-| OutOfSampleAgent | MVP done | Reuses BacktestAgent over train / validation / test or walk-forward signal-date windows, then stores validation JSON, CSV summaries, and in-sample/out-of-sample metric comparisons |
-| Transaction cost model | Done | Commission, stamp duty, transfer fee, slippage, turnover, gross/net metrics |
-| Benchmark tests | Done | Deterministic gates over sample size, RankIC, net Sharpe, net return, drawdown, and average leg count |
-| CriticAgent | Done | Converts failed benchmark gates into track/revise/reject critiques |
-| MemoryAgent | Done | JSONL factor research memory |
-| FAISS search | Done | Local semantic search over factor memory |
-| Factor wiki | Done | Markdown factor knowledge base |
-| ReportAgent | Done | Structured draft and Markdown report generation with explicit out-of-sample validation markers |
-| Bilingual output | Done | Reports, Factor Wiki, daily summaries, AkShare smoke, and dashboard support `en` / `zh` / `bilingual` |
-| DailyRankingAgent | Done | Daily Top N candidate stock ranking as CSV and Markdown |
-| A-share trading constraints | Done | T+1 note, price-limit flags, ST/suspension/new-stock/delisting-risk filters |
-| Streamlit dashboard | Done | Factor ranking, metric distributions, report inventory |
-| Factor Explorer | Done | Single-factor diagnostics and linked reports |
-| Semantic Search UI | Done | Search historical factor memory from the dashboard |
-| End-to-end offline test | Done | DataAgent to Dashboard/Search artifact handoff |
-| Daily research pipeline | Done | Config-driven DataAgent-to-ReportAgent run with explicit selected factor column and manifest |
-
-### Core Modules
-
-| Module | File | Purpose |
-| --- | --- | --- |
-| DataAgent | `quant-agent/agents/data_agent.py` | Ingest, clean, align, cache, and persist market data |
-| FeatureAgent | `quant-agent/agents/feature_agent.py` | Compute single-factor and composite-factor matrices from aligned OHLCV |
-| Factor registry | `quant-agent/agents/factor_registry.py` | Manage factor definitions, composite factor configs, and source metadata |
-| Factor expression | `quant-agent/agents/factor_expression.py` | Safely execute parameterized formulas emitted by FactorGenerationAgent |
-| FactorGenerationAgent | `quant-agent/agents/factor_generator.py` | Generate candidate factor definitions |
-| ExperimentAgent | `quant-agent/agents/experiment_agent.py` | Batch-evaluate multiple factors from one factor manifest |
-| ExperimentStore | `quant-agent/agents/experiment_store.py` | Persist experiment results, summaries, history index, lineage metadata, and query results |
-| BacktestAgent | `quant-agent/agents/backtest_agent.py` | Backtest one factor and produce evaluation metrics |
-| OutOfSampleAgent | `quant-agent/agents/out_of_sample_agent.py` | Validate one factor across train / validation / test or walk-forward windows |
-| Transaction Costs | `quant-agent/agents/transaction_costs.py` | Centralize A-share cost assumptions and turnover cost estimates |
-| CriticAgent | `quant-agent/agents/critic_agent.py` | Review backtest quality and explain failed gates |
-| MemoryAgent | `quant-agent/agents/memory_agent.py` | Store factor research records and FAISS indexes |
-| ReportAgent | `quant-agent/agents/report_agent.py` | Generate Markdown research reports with out-of-sample validation status |
-| A-share constraints | `quant-agent/agents/ashare_trading_constraints.py` | Generate reusable A-share trading-constraint flags |
-| DailyRankingAgent | `quant-agent/agents/daily_ranking.py` | Generate daily candidate stock rankings |
-| I18N | `quant-agent/core/i18n.py` | Shared bilingual output labels |
-| Daily Research | `quant-agent/scripts/run_daily_research.py` | Run the daily pipeline and write a run manifest |
-| Dashboard | `quant-agent/dashboard.py` | Inspect factors, reports, and semantic search results |
-| AkShare Smoke | `quant-agent/scripts/run_akshare_smoke.py` | Diagnose real AkShare connectivity and data quality |
-
-### Tech Stack
-
-- Python 3.11+
-- Pandas, NumPy
-- AkShare
-- DuckDB
-- FAISS
-- Streamlit
-- pytest, ruff, mypy
+- factor decay curves across 1D / 3D / 5D / 10D / 20D horizons;
+- factor correlation control and multi-factor alpha selection;
+- DecisionAgent for entry, exit, and invalidation conditions;
+- PortfolioAgent for sizing, portfolio risk, and paper trading logs.
 
 ### Quick Start
 
@@ -719,40 +489,17 @@ cd Quant_Research_AI_Agents/quant-agent
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
-```
-
-Configure human-facing output language:
-
-```bash
 export QUANT_AGENT_OUTPUT_LANGUAGE=bilingual
 ```
 
-Allowed values are `bilingual`, `zh`, and `en`. `bilingual` is the default.
-Structured JSON keys stay in English for stable agent interfaces; human-facing
-reports, Factor Wiki pages, terminal summaries, AkShare smoke suggestions, and
-dashboard labels follow the language setting.
-
-Run the basic app smoke test:
+Run checks:
 
 ```bash
 python app.py
+python -m pytest
+python -m ruff check .
+python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.py scripts/run_daily_research.py
 ```
-
-Run the real AkShare diagnostic smoke test:
-
-```bash
-python scripts/run_akshare_smoke.py \
-  --symbol 000001 \
-  --start-date 2024-01-02 \
-  --end-date 2024-01-03 \
-  --symbol-sleep-sec 0.2 \
-  --output-language bilingual \
-  --output /tmp/akshare-smoke.json
-```
-
-If AkShare's Eastmoney historical K-line endpoint closes the connection,
-DataAgent automatically falls back to AkShare's Sina daily endpoint and still
-normalizes the result into the shared OHLCV schema.
 
 Run the dashboard:
 
@@ -760,283 +507,96 @@ Run the dashboard:
 streamlit run dashboard.py
 ```
 
-Run the daily research pipeline:
+### Practical Workflow
 
-```bash
-python scripts/run_daily_research.py --config /path/to/daily_research.json
-```
-
-Minimal JSON config:
-
-```json
-{
-  "run_id": "daily-demo",
-  "universe": "custom_batch",
-  "symbols": ["000001", "000002", "000003", "000004", "000005"],
-  "start_date": "2024-01-01",
-  "end_date": "2024-03-31",
-  "output_dir": "daily_runs",
-  "template_ids": ["close_to_open_return"],
-  "factor_column": "factor__close_to_open_return",
-  "factor_set_name": "daily_demo",
-  "factor_direction": "positive",
-  "quantile_count": 5,
-  "ranking_top_n": 10,
-  "transaction_costs": {
-    "enabled": true,
-    "profile_name": "a_share_retail_default",
-    "commission_rate": 0.0003,
-    "stamp_duty_rate": 0.0005,
-    "transfer_fee_rate": 0.00001,
-    "slippage_rate": 0.0005
-  },
-  "trading_constraints": {
-    "t_plus_one": true,
-    "exclude_suspended": true,
-    "exclude_limit_up": false,
-    "exclude_limit_down": false,
-    "exclude_st": true,
-    "exclude_new_stock": true,
-    "exclude_delisting_risk": true,
-    "new_stock_min_trading_days": 60
-  },
-  "output_language": "bilingual",
-  "factor_metadata": {
-    "name": "daily_close_to_open",
-    "formula": "close / open - 1",
-    "hypothesis": "Intraday strength may persist into next-day returns."
-  }
-}
-```
-
-If `template_ids` contains multiple templates, they are separate candidate
-factors, not an automatic composite. In that case, set `factor_column`
-explicitly or the pipeline stops with a selection error. To combine weak
-signals, define `composite_factors` and select the generated composite column:
-
-```json
-{
-  "template_ids": ["close_to_open_return", "return_5d", "volume_ratio_5d_20d"],
-  "composite_factors": [
-    {
-      "name": "daily_blend_v1",
-      "normalize": "rank_pct",
-      "components": [
-        {"factor": "close_to_open_return", "weight": 0.4},
-        {"factor": "return_5d", "weight": 0.4},
-        {"factor": "volume_ratio_5d_20d", "weight": 0.2}
-      ]
-    }
-  ],
-  "factor_column": "factor__daily_blend_v1"
-}
-```
-
-`normalize` supports `none`, `rank_pct`, and `zscore`. Composite factors are
-written into the factor matrix, factor manifest, and daily research manifest.
-`factor_definitions` stores each factor's `source_type`, `formula`,
-`hypothesis`, `category`, `direction`, `lookback_days`, and `data_lag_days`;
-research reports and the Factor Wiki display those fields.
-
-The script runs `DataAgent -> FeatureAgent -> BacktestAgent -> CriticAgent
--> DailyRankingAgent -> MemoryAgent -> ReportAgent` and writes
-`output_dir/run_id/daily_research_manifest.json` with stage summaries and
-artifact paths.
-It also writes:
-
-- `output_dir/run_id/daily_stock_ranking.csv`
-- `output_dir/run_id/daily_stock_ranking.md`
-
-The ranking includes factor score, rank, recent 5-day return, 20-day volatility,
-20-day drawdown, turnover, trading-constraint status, reason text, and risk
-text. By default it filters suspended/missing rows, ST stocks, new stocks, and
-delisting-risk stocks. Limit-up and limit-down rows are flagged but not filtered
-unless `trading_constraints.exclude_limit_up` or
-`trading_constraints.exclude_limit_down` is enabled. It is still research
-support only. Backtests, reports, memory records, and the dashboard now retain
-configurable transaction-cost assumptions plus gross and net metrics; stock
-ranking still does not perform position sizing.
-
-Run tests and checks:
-
-```bash
-python -m pytest
-python -m ruff check .
-python -m mypy core agents tests app.py dashboard.py scripts/run_akshare_smoke.py scripts/run_daily_research.py
-```
-
-### How To Use
-
-The current practical flow is:
+The practical research flow is:
 
 ```text
-DataAgent -> FeatureAgent -> BacktestAgent -> OutOfSampleAgent -> CriticAgent -> DailyRankingAgent -> MemoryAgent -> ReportAgent -> Dashboard
+AkShare smoke
+  -> Daily research pipeline
+  -> Daily ranking and report
+  -> OutOfSampleAgent validation
+  -> ReportAgent with OOS marker
+  -> Dashboard review
 ```
 
-Example data request:
+Run an AkShare diagnostic:
 
-```python
-from agents.data_agent import DataAgent
-from core.models import AgentRequest
-
-request = AgentRequest.create(
-    {
-        "universe": "custom_batch",
-        "symbols": ["000001", "000002"],
-        "start_date": "2024-01-02",
-        "end_date": "2024-01-03",
-        "provider": "akshare",
-        "frequency": "daily",
-        "max_retries": 2,
-        "retry_backoff_sec": 0.5,
-        "symbol_sleep_sec": 0.2,
-        "continue_on_symbol_error": True,
-    }
-)
-
-response = DataAgent().run(request)
-print(response.output["aligned_data_path"])
+```bash
+python scripts/run_akshare_smoke.py \
+  --symbol 002126 \
+  --start-date 2024-05-01 \
+  --end-date 2024-05-10 \
+  --symbol-sleep-sec 0.2 \
+  --output-language bilingual \
+  --output /tmp/akshare-smoke-002126.json
 ```
 
-Example factor computation:
+Run a daily research config:
 
-```python
-from agents.feature_agent import FeatureAgent
-from core.models import AgentRequest
-
-response = FeatureAgent().run(
-    AgentRequest.create(
-        {
-            "aligned_data_path": "data/processed/aligned_ohlcv_akshare_custom_batch_daily_none_20240102_20240103.csv",
-            "template_ids": ["return_5d"],
-            "save_factors": True,
-        }
-    )
-)
-print(response.output["storage_stats"]["manifest_path"])
+```bash
+python scripts/run_daily_research.py --config tmp/yinlun_daily.json
 ```
 
-Example backtest:
+Important outputs:
 
-```python
-from agents.backtest_agent import BacktestAgent
-from core.models import AgentRequest
-
-response = BacktestAgent().run(
-    AgentRequest.create(
-        {
-            "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
-            "factor_column": "factor__return_5d",
-            "factor_direction": "positive",
-            "forward_return_days": 1,
-            "transaction_costs": {
-                "enabled": True,
-                "commission_rate": 0.0003,
-                "stamp_duty_rate": 0.0005,
-                "transfer_fee_rate": 0.00001,
-                "slippage_rate": 0.0005,
-            },
-            "result_json_path": "results/backtests/custom_batch_return_5d.json",
-        }
-    )
-)
-print(response.output["benchmark_status"])
-print(response.output["benchmark_tests"]["failed_tests"])
-print(response.output["cost_stats"])
+```text
+daily_runs/<run_id>/daily_research_manifest.json
+daily_runs/<run_id>/daily_stock_ranking.csv
+daily_runs/<run_id>/daily_stock_ranking.md
+daily_runs/<run_id>/backtest_result.json
+daily_runs/<run_id>/research_report.md
+memory/factor_memory.jsonl
+memory/factor_wiki.md
 ```
 
-Example batch experiment:
+Inspect manifest artifacts:
 
-```python
-from agents.experiment_agent import ExperimentAgent
-from core.models import AgentRequest
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
 
-response = ExperimentAgent().run(
-    AgentRequest.create(
-        {
-            "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
-            "experiment_id": "custom_batch_experiment_v1",
-            "factor_columns": ["factor__return_5d", "factor__momentum_volume_blend"],
-            "quantile_count": 5,
-            "output_dir": "experiments",
-            "output_language": "bilingual",
-        }
-    )
-)
-print(response.output["summary"])
-print(response.output["storage_stats"]["summary_path"])
+manifest = json.loads(Path("daily_runs/yinlun-002126-daily/daily_research_manifest.json").read_text())
+print(json.dumps(manifest["summary"], ensure_ascii=False, indent=2))
+print(json.dumps(manifest["artifacts"], ensure_ascii=False, indent=2))
+PY
 ```
 
-The ExperimentAgent MVP evaluates existing factor columns from a saved factor
-manifest and stores JSON, CSV, JSONL history, and lineage artifacts. Lineage
-captures git commit, dirty state, config hash, factor manifest hash, and a data
-version fingerprint.
+### Out-of-sample Validation
 
-It can also generate candidate factors first, map each candidate's
-parameterized expression through the restricted FactorExpression engine, save a
-factor manifest, and batch-backtest the resulting `factor__alpha_*` columns.
+Daily reports do not automatically prove out-of-sample robustness. Run
+`OutOfSampleAgent` separately before treating a factor as a serious alpha
+candidate.
 
-```python
-from agents.experiment_agent import ExperimentAgent
-from core.models import AgentRequest
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
 
-response = ExperimentAgent().run(
-    AgentRequest.create(
-        {
-            "aligned_data_path": "data/processed/aligned_ohlcv_demo.csv",
-            "candidate_generation": {"target_count": 20},
-            "factor_set_name": "auto_candidate_batch",
-            "experiment_id": "auto-candidates-v1",
-            "output_dir": "experiments",
-        }
-    )
-)
-print(response.output["candidate_generation"]["execution"])
-print(response.output["factor_manifest_path"])
-```
-
-Example history query:
-
-```python
-from agents.experiment_store import ExperimentQuerySpec, ExperimentStore
-
-result = ExperimentStore("experiments").query(
-    ExperimentQuerySpec(
-        factor_categories=("momentum",),
-        benchmark_statuses=("passed",),
-        critic_verdicts=("track",),
-    )
-)
-print(result.records)
-```
-
-Example train / validation / test out-of-sample validation:
-
-```python
 from agents.out_of_sample_agent import OutOfSampleAgent
 from core.models import AgentRequest
+
+manifest = json.loads(
+    Path("daily_runs/yinlun-002126-daily/daily_research_manifest.json").read_text()
+)
+factor_manifest_path = manifest["artifacts"]["factor_manifest_path"]
 
 response = OutOfSampleAgent().run(
     AgentRequest.create(
         {
-            "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
-            "factor_column": "factor__return_5d",
-            "validation_id": "return_5d_oos_v1",
+            "factor_manifest_path": factor_manifest_path,
+            "factor_column": "factor__yinlun_blend_v1",
+            "validation_id": "yinlun_blend_v1_oos",
             "output_dir": "validations",
             "splits": [
-                {"name": "train", "start_date": "2020-01-01", "end_date": "2022-12-31"},
-                {"name": "validation", "start_date": "2023-01-01", "end_date": "2023-12-31"},
-                {"name": "test", "start_date": "2024-01-01", "end_date": "2025-12-31"}
+                {"name": "train", "start_date": "2023-01-01", "end_date": "2024-06-30"},
+                {"name": "validation", "start_date": "2024-07-01", "end_date": "2025-06-30"},
+                {"name": "test", "start_date": "2025-07-01", "end_date": "2026-05-19"}
             ],
             "factor_direction": "positive",
             "forward_return_days": 1,
-            "quantile_count": 5,
-            "benchmark_thresholds": {
-                "min_mean_rank_ic": 0.02,
-                "min_sharpe": 0.5,
-                "min_total_return": 0.0,
-                "max_drawdown_abs": 0.35
-            }
+            "quantile_count": 3
         }
     )
 )
@@ -1044,81 +604,73 @@ response = OutOfSampleAgent().run(
 print(response.output["summary"]["basic_oos_check"])
 print(response.output["summary"]["metric_comparison"])
 print(response.output["storage_stats"]["result_path"])
-print(response.output["storage_stats"]["summary_path"])
+PY
 ```
 
-Example walk-forward validation:
+Then regenerate the report with the validation result:
 
-```python
-response = OutOfSampleAgent().run(
+```bash
+python - <<'PY'
+from agents.report_agent import ReportAgent
+from core.models import AgentRequest
+
+response = ReportAgent().run(
     AgentRequest.create(
         {
-            "factor_manifest_path": "factors/generated/custom_batch_research_task.manifest.json",
-            "factor_column": "factor__return_5d",
-            "validation_id": "return_5d_walk_forward_v1",
-            "output_dir": "validations",
-            "walk_forward": {
-                "start_date": "2020-01-01",
-                "end_date": "2025-12-31",
-                "train_window_days": 504,
-                "test_window_days": 126,
-                "step_days": 126
-            },
-            "factor_direction": "positive",
-            "forward_return_days": 1,
-            "quantile_count": 5
+            "memory_path": "memory/factor_memory.jsonl",
+            "factor_name": "yinlun_blend_v1",
+            "factor_wiki_path": "memory/factor_wiki.md",
+            "out_of_sample_result_path": "validations/yinlun_blend_v1_oos/out_of_sample_result.json",
+            "report_path": "daily_runs/yinlun-002126-daily/research_report_oos.md",
+            "output_language": "bilingual"
         }
     )
 )
 
-print(response.output["summary"]["walk_forward_check"])
-print(response.output["summary"]["metric_comparison"])
+print(response.output["report_path"])
+PY
 ```
 
-OutOfSampleAgent splits by signal date. The future-return horizon is still
-computed by BacktestAgent from the shared aligned price data. It compares
-in-sample and out-of-sample IC, RankIC, net Sharpe, maximum drawdown, average
-turnover, and net return in `summary.metric_comparison`. It writes one backtest
-JSON per split plus:
+The report will show:
 
-- `validations/{validation_id}/out_of_sample_result.json`
-- `validations/{validation_id}/out_of_sample_summary.csv`
+- `Out-of-sample status`
+- `Out-of-sample passed`
+- `Basic OOS status`
+- `Walk-forward status`
+- out-of-sample RankIC, net Sharpe, and net return
 
-### Project Structure
+### Batch Factor Research
 
-```text
-.
-├── README.md
-├── TODO.md
-├── TASKS.md
-├── ARCHITECTURE.md
-└── quant-agent/
-    ├── agents/
-    ├── core/
-    ├── data/
-    ├── experiments/
-    ├── factors/
-    ├── memory/
-    ├── research_logs/
-    ├── validations/
-    ├── scripts/
-    ├── tests/
-    ├── app.py
-    └── dashboard.py
+Use ExperimentAgent when you want to move from a single template factor to a
+research-factory workflow:
+
+```bash
+python - <<'PY'
+from agents.experiment_agent import ExperimentAgent
+from core.models import AgentRequest
+
+response = ExperimentAgent().run(
+    AgentRequest.create(
+        {
+            "aligned_data_path": "data/processed/aligned_ohlcv_demo.csv",
+            "candidate_generation": {"target_count": 30},
+            "factor_set_name": "auto_candidate_batch",
+            "experiment_id": "auto-candidates-v1",
+            "output_dir": "experiments",
+            "quantile_count": 5,
+            "output_language": "bilingual"
+        }
+    )
+)
+
+print(response.output["summary"])
+print(response.output["storage_stats"]["summary_path"])
+PY
 ```
 
-### Roadmap
-
-The roadmap lives in `TODO.md`. The next priorities are:
-
-- extend out-of-sample validation with factor decay and robustness checks
-- add factor correlation analysis and multi-factor alpha selection
-- build DecisionAgent for watchlist-level observe/try/avoid/exit conclusions
-- build PortfolioAgent, paper trading logs, dashboard filters, and watchlist workflows
-
-### Safety Note
+### Safety Boundary
 
 This project produces research support, not investment advice. Before using any
 output in real trading, manually review data quality, out-of-sample performance,
-transaction costs, liquidity, position sizing, risk exposure, and current market
+transaction costs, liquidity, position sizing, risk exposure, and market
 conditions.
